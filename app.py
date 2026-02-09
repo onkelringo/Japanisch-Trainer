@@ -9,7 +9,7 @@ api_key = st.text_input("Gib deinen Gemini API Key ein:", type="password")
 
 if api_key:
     genai.configure(api_key=api_key)
-    model = genai.GenerativeModel('gemini-pro')
+    model = genai.GenerativeModel('gemini-1.5-flash')
 
     # Die Situation festlegen
     prompt_basis = "Du bist die nette Verkäuferin aus der Metzgerei Takezono in Ashiya. Ich bin Stefan, 48, Mathelehrer. Antworte kurz auf Japanisch und korrigiere mich auf Deutsch."
