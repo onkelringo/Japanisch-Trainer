@@ -8,34 +8,38 @@ import base64
 # --- API SETUP ---
 API_KEY = st.secrets.get("GEMINI_API_KEY")
 
-# --- DESIGN SETUP (ONKEL RINGO STYLE & KYOKUJITSU-KI) ---
+# --- RADIKALES DESIGN (FLAGGE & LAYOUT) ---
 st.set_page_config(page_title="Onkel Ringos Lernapp", layout="wide")
 
 st.markdown("""
     <style>
     .stApp { background-color: #0e1117; }
-    .main .block-container { max-width: 800px; padding: 1rem; margin: auto; }
+    .main .block-container { max-width: 700px; padding: 1rem; margin: auto; }
     
-    .stefan-box { font-size: 0.85rem; color: #aaa; margin-top: 10px; padding-left: 5px;}
+    /* Stefan's Box: Klein und dezent */
+    .stefan-box { font-size: 0.85rem; color: #888; margin: 5px 0; }
     
+    /* Antwort-Box */
     .seller-box { 
         font-size: 1.3rem !important; color: #00ffcc; background: #1a1c23; 
-        padding: 18px; border-radius: 10px; border-left: 5px solid #bc002d;
+        padding: 15px; border-radius: 10px; border-left: 5px solid #bc002d;
     }
 
-    /* Der "Onkel Ringo" Spezial-Button: Japanische Flagge 1940 (Kyokujitsu-ki) */
-    div[data-testid="stVerticalBlock"] > div:has(svg) {
-        display: flex; justify-content: center; 
-        transform: scale(2.8); 
-        margin: 60px auto !important;
+    /* KYOKUJITSU-KI (Strahlen-Flagge) als Aufnahme-Button */
+    /* Wir erzwingen das Design über den Container des Recorders */
+    [data-testid="stVerticalBlock"] div:has(svg) {
+        display: flex !important;
+        justify-content: center !important;
+        align-items: center !important;
+        transform: scale(2.5);
+        margin: 50px auto !important;
+        width: 80px !important;
+        height: 80px !important;
         border-radius: 50% !important;
-        width: 85px; height: 85px;
         border: 2px solid #bc002d !important;
-        box-shadow: 0 0 30px rgba(188, 0, 45, 0.7);
-        
-        /* 16 Sonnenstrahlen Design */
+        box-shadow: 0 0 25px rgba(188, 0, 45, 0.6) !important;
         background: conic-gradient(
-            from 0deg, 
+            from 0deg,
             #bc002d 0deg 11.25deg, #ffffff 11.25deg 22.5deg,
             #bc002d 22.5deg 33.75deg, #ffffff 33.75deg 45deg,
             #bc002d 45deg 56.25deg, #ffffff 56.25deg 67.5deg,
@@ -55,88 +59,78 @@ st.markdown("""
         ) !important;
     }
     
-    /* Kontrastreiches Icon im Zentrum der Flagge */
-    div[data-testid="stVerticalBlock"] > div:has(svg) svg {
-        fill: #000000 !important;
-        filter: drop-shadow(0px 0px 3px #ffffff);
-    }
+    /* Icon-Farbe anpassen */
+    svg { fill: #000 !important; }
     </style>
 """, unsafe_allow_html=True)
 
-# --- MODEL ---
+# --- MODEL-LOGIK (OPTIMIERT GEGEN LIMITS) ---
 @st.cache_resource
 def get_model(api_key):
-    try:
-        genai.configure(api_key=api_key)
-        # Fix auf 1.5-flash für beste Performance
-        return genai.GenerativeModel('gemini-1.5-flash')
-    except: return None
+    genai.configure(api_key=api_key)
+    # 1.5-flash-8b ist das "kleinste" Modell mit den höchsten freien Limits
+    return genai.GenerativeModel('gemini-1.5-flash-8b')
 
-# --- LOGIK ---
+# --- CHAT STATE ---
 if "chat" not in st.session_state: st.session_state.chat = []
-if "last_audio_hash" not in st.session_state: st.session_state.last_audio_hash = None
+if "last_audio" not in st.session_state: st.session_state.last_audio = None
 
-def talk_to_seller(audio_bytes, sit):
+def ask_ai(audio_bytes, location):
     model = get_model(API_KEY)
-    if not model: return "API Fehler."
     try:
-        audio_part = {"mime_type": "audio/wav", "data": audio_bytes}
-        prompt = (f"Du bist Verkäuferin in {sit}. Stefan spricht. "
-                  "Sei extrem höflich, nutze nur ganz dezent Kansai-Akzent. "
-                  "Transkribiere zuerst Stefans Japanisch/Deutsch. "
-                  "FORMAT: STEFAN: [Text] JAPANISCH: [Antwort] DEUTSCH: [Übersetzung]")
-        res = model.generate_content([prompt, audio_part])
+        audio_info = {"mime_type": "audio/wav", "data": audio_bytes}
+        # Kurzer Prompt spart Tokens/Limits
+        prompt = (f"Verkäuferin in {location}. Stefan spricht. Antworte höflich, wenig Kansai-Dialekt. "
+                  "Format: STEFAN: [Text] JAPANISCH: [Antwort] DEUTSCH: [Text]")
+        # WICHTIG: Keine History mitschicken um 429 Fehler zu vermeiden
+        res = model.generate_content([prompt, audio_info])
         return res.text
     except Exception as e:
-        if "429" in str(e): return "Quota voll. Bitte kurz warten."
-        return f"Fehler: {str(e)}"
+        return f"LIMIT! Bitte 30 Sek warten. ({str(e)})"
 
 # --- UI ---
 st.title("🏯 Onkel Ringos Lernapp")
 
 with st.sidebar:
-    st.markdown("### 🗺️ Reiseziele")
-    situation = st.selectbox("Ort:", ["Metzgerei Takezono", "McDonald's Ashiya", "Bus Arima Onsen"])
+    sit = st.selectbox("Ort:", ["Metzgerei Takezono", "McDonald's Ashiya", "Bus Arima Onsen"])
     if st.button("Verlauf löschen"):
         st.session_state.chat = []
-        st.session_state.last_audio_hash = None
         st.rerun()
 
-# Verlauf Chronologisch (Unten neu)
+# Verlauf (Chronologisch von oben nach unten)
 for i, msg in enumerate(st.session_state.chat):
     st.divider()
     
-    stefan_text = ""
-    jp_text = ""
+    # Extraktion Stefan vs Japanisch
+    parts = {"s": "", "j": ""}
     if "STEFAN:" in msg and "JAPANISCH:" in msg:
-        stefan_text = msg.split("STEFAN:").split("JAPANISCH:").strip()
-        jp_text = msg.split("JAPANISCH:").split("DEUTSCH:").strip()
+        parts["s"] = msg.split("STEFAN:").split("JAPANISCH:").strip()
+        parts["j"] = msg.split("JAPANISCH:").split("DEUTSCH:").strip()
 
-    if stefan_text:
-        st.markdown(f'<div class="stefan-box">Onkel Ringo verstand: "{stefan_text}"</div>', unsafe_allow_html=True)
+    if parts["s"]:
+        st.markdown(f'<div class="stefan-box">Stefan sagte: {parts["s"]}</div>', unsafe_allow_html=True)
 
-    if jp_text:
+    if parts["j"]:
         try:
-            tts = gTTS(text=jp_text, lang='ja')
+            tts = gTTS(text=parts["j"], lang='ja')
             b = io.BytesIO(); tts.write_to_fp(b)
             b64 = base64.b64encode(b.getvalue()).decode()
-            is_new = (i == len(st.session_state.chat) - 1)
-            play_attr = "autoplay" if is_new else ""
-            st.markdown(f'<audio src="data:audio/mp3;base64,{b64}" controls {play_attr}></audio>', unsafe_allow_html=True)
+            # Nur letzte Nachricht spielt automatisch
+            auto = "autoplay" if i == len(st.session_state.chat)-1 else ""
+            st.markdown(f'<audio src="data:audio/mp3;base64,{b64}" controls {auto}></audio>', unsafe_allow_html=True)
         except: pass
 
-    with st.expander("👁️ Antwort der Verkäuferin"):
+    with st.expander("👁️ Lösung anzeigen"):
         st.markdown(f'<div class="seller-box">{msg}</div>', unsafe_allow_html=True)
 
-# Mikrofon ganz unten
+# Mikrofon am Ende
 st.write("---")
-audio_data = audio_recorder(text="", pause_threshold=3.0, icon_name="microphone", key="mic_v16")
+# Der Recorder-Button übernimmt durch das CSS das Flaggen-Design
+audio_data = audio_recorder(text="", icon_size="2x", pause_threshold=3.0, key="ringo_mic")
 
-if audio_data is not None:
-    curr_hash = hash(audio_data)
-    if st.session_state.last_audio_hash != curr_hash:
-        st.session_state.last_audio_hash = current_hash
-        with st.spinner("Onkel Ringo denkt nach..."):
-            answer = talk_to_seller(audio_data, situation)
-            st.session_state.chat.append(answer)
-            st.rerun()
+if audio_data and audio_data != st.session_state.last_audio:
+    st.session_state.last_audio = audio_data
+    with st.spinner("Onkel Ringo hört zu..."):
+        ans = ask_ai(audio_data, sit)
+        st.session_state.chat.append(ans)
+        st.rerun()
