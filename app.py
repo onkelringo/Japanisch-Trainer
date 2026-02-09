@@ -4,114 +4,162 @@ from gtts import gTTS
 import io
 import base64
 
-# --- CONFIG & STYLE ---
-st.set_page_config(page_title="Sensei Stefan's Japan-Trainer", layout="wide")
+# --- BUNTES IPAD PRO DESIGN ---
+st.set_page_config(page_title="Sensei Stefans Japan-Coach", layout="wide")
 
 st.markdown("""
     <style>
-    .stApp { background-color: #f0f2f6; }
-    .stMarkdown p { font-size: 1.4rem !important; }
-    audio { width: 100%; border-radius: 10px; margin: 10px 0; border: 2px solid #ff4b4b; }
-    .stChatInput { bottom: 20px !important; }
+    /* Hintergrund & Farbverlauf */
+    .stApp {
+        background: linear-gradient(135deg, #1e1e2f 0%, #2d1b33 100%);
+        color: #ffffff;
+    }
+
+    /* Boxen für Chat-Nachrichten */
+    .stChatMessage {
+        background-color: rgba(255, 255, 255, 0.05) !important;
+        border-radius: 15px !important;
+        border: 1px solid #ff4b4b !important;
+        margin-bottom: 10px;
+    }
+
+    /* XXL Schrift für Stefan */
+    .stMarkdown p {
+        font-size: 1.5rem !important;
+        line-height: 1.6;
+        color: #f0f0f0;
+    }
+
+    /* Der "Frech-Faktor" Header */
+    h1 {
+        color: #ff4b4b !important;
+        text-shadow: 2px 2px #5d00ff;
+        font-size: 3rem !important;
+    }
+
+    /* Audio Player Styling */
+    audio {
+        width: 100%;
+        filter: invert(100%) hue-rotate(180deg) brightness(1.5);
+        height: 50px;
+    }
+
+    /* Input-Feld Kontrast */
+    .stChatInput input {
+        background-color: #262730 !important;
+        color: white !important;
+        border: 2px solid #5d00ff !important;
+    }
     </style>
 """, unsafe_allow_html=True)
 
-# --- INITIALISIERUNG ---
-if "messages" not in st.session_state:
-    st.session_state.messages = []
-if "current_sit" not in st.session_state:
-    st.session_state.current_sit = None
+# --- INTELLIGENTE MODELL-SUCHE ---
+@st.cache_resource
+def get_best_model(api_key):
+    genai.configure(api_key=api_key)
+    try:
+        models = genai.list_models()
+        # Suche nach Pro-Modellen, dann Flash, dann alles andere
+        model_names = [m.name for m in models if 'generateContent' in m.supported_generation_methods]
 
-# --- SIDEBAR ---
+        # Prioritätenliste
+        for preferred in ["gemini-1.5-pro", "gemini-1.5-flash", "gemini-pro"]:
+            for m in model_names:
+                if preferred in m:
+                    return m
+        return model_names[0] if model_names else None
+    except Exception as e:
+        return None
+
+# --- AUDIO LOGIK ---
+def generate_audio_html(text):
+    try:
+        # Extraktion des japanischen Teils
+        if "JAPANISCH:" in text:
+            jp_part = text.split("JAPANISCH:")[1].split("DEUTSCH:")[0].strip()
+        else:
+            jp_part = text
+
+        tts = gTTS(text=jp_part, lang='ja')
+        audio_io = io.BytesIO()
+        tts.write_to_fp(audio_io)
+        b64 = base64.b64encode(audio_io.getvalue()).decode()
+        return f'<audio controls autoplay src="data:audio/mp3;base64,{b64}"></audio>'
+    except:
+        return None
+
+# --- APP START ---
+st.title("⛩️ Sensei Stefan: Tokyo Nights")
+
 with st.sidebar:
-    st.title("⛩️ Training-Center")
-    api_key = st.text_input("Gemini API Key", type="password")
-    
-    situation = st.selectbox(
-        "Wo willst du glänzen, Stefan?",
-        ["Bitte wählen...", "Metzgerei Takezono (Beef-Time)", "McDonald's Ashiya (Burger-Check)", "Bus nach Arima Onsen (Roadtrip)"]
-    )
-    
-    if st.button("Gespräch neu starten"):
-        st.session_state.messages = []
-        st.session_state.current_sit = None
-        st.rerun()
+    st.header("Konfiguration")
+    api_key = st.text_input("Dein Gemini Key", type="password")
 
-if not api_key:
-    st.warning("Ohne Key läuft hier nichts, Sensei!")
+    if api_key:
+        model_id = get_best_model(api_key)
+        if model_id:
+            st.success(f"Aktiv: {model_id}")
+        else:
+            st.error("Kein Modell gefunden.")
+
+    st.divider()
+    location = st.selectbox(
+        "Wo bist du heute?",
+        ["Wähle dein Abenteuer...", "Metzgerei Takezono", "McDonald's Ashiya", "Bus nach Arima Onsen"]
+    )
+
+if not api_key or location == "Wähle dein Abenteuer...":
+    st.info("👋 Hallo Stefan! Gib links den Key ein und wähle einen Ort, um das Training zu starten.")
     st.stop()
 
-# --- KI SETUP ---
-genai.configure(api_key=api_key)
+# --- CHAT STATE ---
+if "messages" not in st.session_state or st.session_state.get("last_loc") != location:
+    st.session_state.messages = []
+    st.session_state.last_loc = location
 
-def get_chat_response(prompt):
-    try:
-        # Wir nutzen flash für die Geschwindigkeit auf dem iPad
-        model = genai.GenerativeModel('gemini-1.5-flash')
-        response = model.generate_content(prompt)
-        return response.text
-    except Exception as e:
-        return f"Fehler: {str(e)}"
-
-def play_audio(text):
-    try:
-        # Extrahiere nur den japanischen Teil für die Sprachausgabe
-        if "JAPANISCH:" in text:
-            jp_text = text.split("JAPANISCH:")[1].split("DEUTSCH:")[0].strip()
-        else:
-            jp_text = text
-        
-        tts = gTTS(text=jp_text, lang='ja')
-        fp = io.BytesIO()
-        tts.write_to_fp(fp)
-        b64 = base64.b64encode(fp.getvalue()).decode()
-        html_elt = f'<audio src="data:audio/mp3;base64,{b64}" controls autoplay></audio>'
-        st.markdown(html_elt, unsafe_allow_html=True)
-    except:
-        st.error("Audio-Sensei macht gerade Pause.")
-
-# --- LOGIK ---
-if situation != "Bitte wählen..." and situation != st.session_state.current_sit:
-    st.session_state.current_sit = situation
-    st.session_state.messages = [] # Reset bei Ortswechsel
-    
-    # Frecher Start-Prompt
-    start_prompt = (
-        f"Du bist ein Angestellter bei {situation}. Stefan, ein deutscher Mathelehrer (48), betritt den Laden. "
-        "Begrüße ihn extrem höflich, aber baue eine winzige, freche Anspielung auf Mathematik oder deutsches Lehrer-Dasein ein. "
-        "Format: JAPANISCH: [Text]\nDEUTSCH: [Übersetzung]"
+    # Der freche Start-Prompt
+    model = genai.GenerativeModel(model_id)
+    intro_prompt = (
+        f"Du bist ein extrem höflicher, aber leicht sarkastischer Angestellter bei {location}. "
+        "Stefan (48, Mathelehrer aus Deutschland) kommt zu dir. Er lernt Japanisch. "
+        "Begrüße ihn formell, aber mach eine kleine Bemerkung darüber, dass Japanisch lernen "
+        "schwerer ist als Kurvendiskussionen. Antworte nur im Format:\n"
+        "JAPANISCH: [Satz]\nDEUTSCH: [Übersetzung]"
     )
-    initial_msg = get_chat_response(start_prompt)
-    st.session_state.messages.append({"role": "assistant", "content": initial_msg})
+    try:
+        response = model.generate_content(intro_prompt)
+        st.session_state.messages.append({"role": "assistant", "content": response.text})
+    except:
+        st.error("API-Limit erreicht oder Fehler.")
 
-# --- UI ANZEIGE ---
-st.title(f"📍 {st.session_state.current_sit or 'Wähle einen Ort'}")
-
+# --- DISPLAY ---
 for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
         st.write(msg["content"])
-        if msg["role"] == "assistant":
-            # Audio nur für die letzte Nachricht automatisch abspielen
-            if msg == st.session_state.messages[-1]:
-                play_audio(msg["content"])
+        if msg["role"] == "assistant" and msg == st.session_state.messages[-1]:
+            audio_html = generate_audio_html(msg["content"])
+            if audio_html:
+                st.markdown(audio_html, unsafe_allow_html=True)
 
-# --- INPUT ---
-if user_input := st.chat_input("Hau was raus, Sensei Stefan..."):
+# --- USER INPUT ---
+if user_input := st.chat_input("Tippe oder diktiere hier..."):
     st.session_state.messages.append({"role": "user", "content": user_input})
-    
-    # System Prompt für die laufende Konversation
-    system_instruction = (
-        f"Du bist der Angestellte bei {situation}. Stefan antwortet dir. "
-        "Bleib in deiner Rolle. Sei höflich, aber 'Gen-Z-Japanisch-frech'. "
-        "Wenn er einen Fehler macht, korrigiere ihn charmant (wie ein Mathelehrer, der einen Vorzeichenfehler findet). "
-        "ANTWORTE IMMER IN DIESEM FORMAT:\n"
-        "STEFAN SAGTE (AUF DEUTSCH): [Was er wohl meinte]\n"
-        "JAPANISCH: [Deine Antwort]\n"
-        "DEUTSCH: [Übersetzung deiner Antwort]"
+
+    # System-Anweisung für das Gespräch
+    system_prompt = (
+        f"Du bist der Angestellte bei {location}. Stefan antwortet dir. "
+        "Antworte ihm immer in diesem Format:\n"
+        "STEFAN SAGTE (DEUTSCH): [Deine Vermutung was er meinte]\n"
+        "JAPANISCH: [Deine Antwort auf Japanisch]\n"
+        "DEUTSCH: [Die Übersetzung deiner Antwort]\n\n"
+        "Sei charmant, frech und korrigiere seine Fehler so, wie man einen Schüler "
+        "korrigiert, der 2+2=5 gerechnet hat."
     )
-    
-    full_prompt = f"{system_instruction}\nStefan sagt: {user_input}"
-    with st.spinner("Überlege..."):
-        ai_response = get_chat_response(full_prompt)
-        st.session_state.messages.append({"role": "assistant", "content": ai_response})
-    st.rerun()
+
+    model = genai.GenerativeModel(model_id)
+    try:
+        response = model.generate_content(f"{system_prompt}\nStefan: {user_input}")
+        st.session_state.messages.append({"role": "assistant", "content": response.text})
+        st.rerun()
+    except Exception as e:
+        st.error(f"Fehler: {e}")
