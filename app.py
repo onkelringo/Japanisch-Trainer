@@ -1,123 +1,99 @@
 import streamlit as st
 import google.generativeai as genai
+from audio_recorder_streamlit import audio_recorder
 from gtts import gTTS
 import io
 import base64
 
-# --- SETTINGS & STYLE ---
-st.set_page_config(page_title="Sensei Stefan v3", layout="wide")
+# --- 1. SETUP & SECRETS ---
+# Store your key in GitHub/Streamlit under: Settings -> Secrets
+# Name: GEMINI_API_KEY | Value: your_key_here
+API_KEY = st.secrets.get("GEMINI_API_KEY", "")
 
-st.markdown("""
+st.set_page_config(page_title="Sensei Stefan v5", layout="wide")
+
+# --- 2. RADIKALES iPAD DESIGN ---
+st.markdown(f"""
     <style>
-    .stApp { background: #0e1117; color: #e0e0e0; }
-    .stMarkdown p { font-size: 1.5rem !important; line-height: 1.6; }
-    .stChatInput input { border: 2px solid #00d4ff !important; font-size: 1.2rem !important; }
-    .stChatMessage { border-radius: 15px; margin-bottom: 10px; border: 1px solid #333; }
-    audio { width: 100%; height: 50px; margin-top: 10px; }
+    /* Background & Body */
+    .stApp {{ background: #0e1117; }}
+    
+    /* Stefan's Text (Your Input) - Made Smaller */
+    .user-text {{ font-size: 1.0rem !important; color: #888; font-style: italic; }}
+    
+    /* Seller Text - Visible Later */
+    .sensei-text {{ font-size: 1.8rem !important; font-weight: bold; color: #ff4b4b; line-height: 1.4; }}
+
+    /* Microphone Button Centering & Size */
+    div[data-testid="stVerticalBlock"] > div:has(svg) {{
+        display: flex; justify-content: center; transform: scale(2.5); margin: 60px 0;
+    }}
+    
+    /* Buttons optimized for Touch (iPad) */
+    .stButton > button {{
+        width: 100%; height: 70px; font-size: 1.4rem !important; border-radius: 15px;
+    }}
     </style>
 """, unsafe_allow_html=True)
 
-# --- SESSION STATE INITIALISIERUNG ---
+# --- 3. LOGIC ---
 if "messages" not in st.session_state:
     st.session_state.messages = []
-if "current_sit" not in st.session_state:
-    st.session_state.current_sit = None
+if "show_text" not in st.session_state:
+    st.session_state.show_text = False
 
-# --- SIDEBAR & MODEL-FINDER ---
+def get_ai_response(audio_bytes, situation):
+    genai.configure(api_key=API_KEY)
+    model = genai.GenerativeModel('gemini-1.5-flash')
+    audio_part = {"mime_type": "audio/wav", "data": audio_bytes}
+    prompt = f"You are a seller at {situation}. Stefan (math teacher) is speaking. Answer cheekily/politely. FORMAT: JAPANESE: [Text] GERMAN: [Text]"
+    response = model.generate_content([prompt, audio_part])
+    return response.text
+
+# --- 4. UI ---
+st.title("🇯🇵 Sensei Stefan: Listening Training")
+
 with st.sidebar:
-    st.title("⚙️ Training Setup")
-    api_key = st.text_input("Gemini API Key", type="password")
-    
-    if st.button("🔥 Speicher leeren (Limit-Fix)"):
+    situation = st.selectbox("Location:", ["Takezono Butcher Shop", "McDonald's Ashiya", "Bus to Arima Onsen"])
+    if st.button("Reset"):
         st.session_state.messages = []
-        st.success("Kontext gelöscht! Start frei.")
-
-    situation = st.selectbox(
-        "Wo trainieren wir?",
-        ["Wähle Ort...", "Metzgerei Takezono", "McDonald's Ashiya", "Bus nach Arima Onsen"]
-    )
-
-# --- INTELLIGENTE MODELLWAHL (FLASH-PRIORITÄT FÜR FREE PLAN) ---
-@st.cache_resource
-def get_stable_model(key):
-    if not key: return None
-    genai.configure(api_key=key)
-    try:
-        available = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
-        # Flash ist im Free Plan viel großzügiger (RPN/TPM)
-        for pref in ["models/gemini-1.5-flash", "models/gemini-1.5-pro", "models/gemini-pro"]:
-            if pref in available:
-                return genai.GenerativeModel(pref)
-        return genai.GenerativeModel(available[0]) if available else None
-    except:
-        return None
-
-model = get_stable_model(api_key)
-
-# --- AUDIO FUNKTION ---
-def get_audio_html(text):
-    try:
-        # Extrahiere Japanisch-Part
-        if "JAPANISCH:" in text:
-            jp_text = text.split("JAPANISCH:")[1].split("DEUTSCH:")[0].strip()
-        else:
-            jp_text = text
-        
-        tts = gTTS(text=jp_text, lang='ja')
-        audio_io = io.BytesIO()
-        tts.write_to_fp(audio_io)
-        b64 = base64.b64encode(audio_io.getvalue()).decode()
-        return f'<audio controls autoplay src="data:audio/mp3;base64,{b64}"></audio>'
-    except:
-        return None
-
-# --- HAUPTLOGIK ---
-if not api_key:
-    st.info("Stefan, bitte links den API Key eingeben.")
-    st.stop()
-
-if situation != "Wähle Ort..." and situation != st.session_state.current_sit:
-    st.session_state.current_sit = situation
-    st.session_state.messages = []
-    
-    # Start-Prompt (Kurz halten für Tokens!)
-    intro_prompt = (
-        f"Du bist Angestellter bei {situation}. Begrüße Stefan (Mathelehrer) extrem höflich auf Japanisch. "
-        "Mach einen kurzen Witz über Mathe. Format: JAPANISCH: [Text] DEUTSCH: [Text]"
-    )
-    try:
-        res = model.generate_content(intro_prompt)
-        st.session_state.messages.append({"role": "assistant", "content": res.text})
-    except:
-        st.error("API Limit erreicht. Klick auf 'Speicher leeren' oder warte 60 Sek.")
-
-# UI Anzeige
-st.title(f"🇯🇵 {st.session_state.current_sit if st.session_state.current_sit else 'Japan-Trainer'}")
-
-for msg in st.session_state.messages:
-    with st.chat_message(msg["role"]):
-        st.write(msg["content"])
-        if msg["role"] == "assistant" and msg == st.session_state.messages[-1]:
-            audio_html = get_audio_html(msg["content"])
-            if audio_html: st.markdown(audio_html, unsafe_allow_html=True)
-
-# Eingabe mit Kontext-Kürzung gegen Limits
-if user_input := st.chat_input("Tippe hier..."):
-    st.session_state.messages.append({"role": "user", "content": user_input})
-    
-    # TOKEN-SPAR-TRICK: Nur die letzten 3 Nachrichten mitsenden
-    recent_context = st.session_state.messages[-3:]
-    
-    system_instruction = (
-        f"Du bist Angestellter bei {situation}. Stefan ist Mathelehrer. Sei höflich und frech. "
-        "Format: STEFAN MEINTE: [Übersetzung] JAPANISCH: [Antwort] DEUTSCH: [Übersetzung]"
-    )
-    
-    chat_prompt = f"{system_instruction}\nVerlauf: {recent_context}\nStefan sagt: {user_input}"
-    
-    try:
-        res = model.generate_content(chat_prompt)
-        st.session_state.messages.append({"role": "assistant", "content": res.text})
         st.rerun()
-    except Exception as e:
-        st.error("Limit erreicht! Bitte kurz warten oder Speicher leeren.")
+
+# THE MICROPHONE (Central & Large)
+st.write("### 🎤 Press and speak (Stops after 5s of silence):")
+audio_data = audio_recorder(
+    text="",
+    recording_color="#ff4b4b",
+    neutral_color="#666",
+    pause_threshold=5.0, # <--- Here: Tolerates 5 seconds of silence!
+    key="mic"
+)
+
+if audio_data and not st.session_state.get("processing", False):
+    st.session_state.processing = True
+    with st.spinner("The seller is thinking..."):
+        answer = get_ai_response(audio_data, situation)
+        st.session_state.messages.append({"role": "assistant", "content": answer})
+        st.session_state.show_text = False # Hide text with new answer
+        st.session_state.processing = False
+        st.rerun()
+
+# CHAT HISTORY
+for msg in st.session_state.messages:
+    if msg["role"] == "assistant":
+        # 1. PLAY AUDIO IMMEDIATELY
+        jp_text = msg["content"].split("JAPANESE:")[1].split("GERMAN:")[0].strip()
+        tts = gTTS(text=jp_text, lang='ja')
+        b = io.BytesIO()
+        tts.write_to_fp(b)
+        b64 = base64.b64encode(b.getvalue()).decode()
+        st.markdown(f'<audio src="data:audio/mp3;base64,{b64}" autoplay controls></audio>', unsafe_allow_html=True)
+        
+        # 2. SHOW TEXT OPTIONALLY
+        if st.button("👁️ Read the seller's answer?", key=msg["content"][:20]):
+            st.session_state.show_text = True
+        
+        if st.session_state.show_text:
+            st.markdown(f'<p class="sensei-text">{msg["content"]}</p>', unsafe_allow_html=True)
+    else:
+        st.markdown(f'<p class="user-text">Stefan: {msg["content"]}</p>', unsafe_allow_html=True)
