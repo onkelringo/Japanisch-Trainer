@@ -5,7 +5,7 @@ import io
 
 # 1. Seiteneinstellungen & Design
 st.set_page_config(page_title="Stefans Ashiya-Trainer", page_icon="🍱")
-st.title("🏯 Stefans Ashiya-Japanisch-Trainer")
+st.title("🏯 Onkel Ringos Ashiya-Japanisch-Trainer")
 st.markdown("*Exklusiv für den Mathematiklehrer aus Takezono*")
 
 # 2. API-Key Sicherheit in der Seitenleiste
