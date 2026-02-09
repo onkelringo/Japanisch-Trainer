@@ -8,43 +8,70 @@ import base64
 # --- API SETUP ---
 API_KEY = st.secrets.get("GEMINI_API_KEY")
 
-# --- DESIGN SETUP ---
-st.set_page_config(page_title="Japan Trainer v12", layout="wide")
+# --- DESIGN SETUP (KYOKUJITSU-KI DESIGN) ---
+st.set_page_config(page_title="Japan Trainer v15", layout="wide")
 
 st.markdown("""
     <style>
     .stApp { background-color: #0e1117; }
-    .main .block-container { max-width: 850px; padding: 1.5rem; margin: auto; }
+    .main .block-container { max-width: 800px; padding: 1rem; margin: auto; }
     
-    /* Sidebar Styling */
-    section[data-testid="stSidebar"] { padding: 20px 10px; background-color: #161b22; }
-    section[data-testid="stSidebar"] .stMarkdown p, section[data-testid="stSidebar"] label {
-        font-size: 0.8rem !important; color: #aaa !important; margin-left: 10px;
-    }
-
-    /* Text-Boxen */
-    .stefan-box { font-size: 0.9rem; color: #888; font-style: italic; margin-bottom: 10px; }
+    .stefan-box { font-size: 0.85rem; color: #aaa; margin-top: 10px; padding-left: 5px;}
+    
     .seller-box { 
         font-size: 1.3rem !important; color: #00ffcc; background: #1a1c23; 
-        padding: 18px; border-radius: 10px; border-left: 4px solid #ff4b4b;
+        padding: 18px; border-radius: 10px; border-left: 5px solid #bc002d;
     }
 
-    /* Mikrofon */
+    /* Kyokujitsu-ki (1940er Stil) für den Record Button */
     div[data-testid="stVerticalBlock"] > div:has(svg) {
-        display: flex; justify-content: center; transform: scale(2.0); margin: 30px 0;
+        display: flex; justify-content: center; 
+        transform: scale(2.5); 
+        margin: 50px auto !important;
+        background-color: #ffffff !important;
+        border-radius: 50% !important;
+        width: 80px; height: 80px;
+        border: 2px solid #bc002d !important;
+        box-shadow: 0 0 25px rgba(188, 0, 45, 0.6);
+        
+        /* Die Strahlen-Optik per CSS-Gradient */
+        background: 
+            inline-size 100%,
+            conic-gradient(from 0deg, 
+                #bc002d 0deg 11.25deg, #ffffff 11.25deg 22.5deg,
+                #bc002d 22.5deg 33.75deg, #ffffff 33.75deg 45deg,
+                #bc002d 45deg 56.25deg, #ffffff 56.25deg 67.5deg,
+                #bc002d 67.5deg 78.75deg, #ffffff 78.75deg 90deg,
+                #bc002d 90deg 101.25deg, #ffffff 101.25deg 112.5deg,
+                #bc002d 112.5deg 123.75deg, #ffffff 123.75deg 135deg,
+                #bc002d 135deg 146.25deg, #ffffff 146.25deg 157.5deg,
+                #bc002d 157.5deg 168.75deg, #ffffff 168.75deg 180deg,
+                #bc002d 180deg 191.25deg, #ffffff 191.25deg 202.5deg,
+                #bc002d 202.5deg 213.75deg, #ffffff 213.75deg 225deg,
+                #bc002d 225deg 236.25deg, #ffffff 236.25deg 247.5deg,
+                #bc002d 247.5deg 258.75deg, #ffffff 258.75deg 270deg,
+                #bc002d 270deg 281.25deg, #ffffff 281.25deg 292.5deg,
+                #bc002d 292.5deg 303.75deg, #ffffff 303.75deg 315deg,
+                #bc002d 315deg 326.25deg, #ffffff 326.25deg 337.5deg,
+                #bc002d 337.5deg 348.75deg, #ffffff 348.75deg 360deg
+            ) !important;
+    }
+    
+    /* Mikrofon-Icon im Zentrum der Strahlen besser sichtbar machen */
+    div[data-testid="stVerticalBlock"] > div:has(svg) svg {
+        fill: white !important;
+        filter: drop-shadow(0px 0px 2px black);
     }
     </style>
 """, unsafe_allow_html=True)
 
-# --- MODEL FINDER ---
+# --- MODEL ---
 @st.cache_resource
-def get_working_model(api_key):
+def get_model(api_key):
     try:
         genai.configure(api_key=api_key)
-        available = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
-        for target in ['models/gemini-1.5-flash', 'models/gemini-pro']:
-            if target in available: return genai.GenerativeModel(target)
-        return genai.GenerativeModel(available[0]) if available else None
+        # Fix auf 1.5-flash für maximale Quota-Stabilität
+        return genai.GenerativeModel('gemini-1.5-flash')
     except: return None
 
 # --- LOGIK ---
@@ -52,71 +79,65 @@ if "chat" not in st.session_state: st.session_state.chat = []
 if "last_audio_hash" not in st.session_state: st.session_state.last_audio_hash = None
 
 def talk_to_seller(audio_bytes, sit):
-    model = get_working_model(API_KEY)
-    if not model: return "API Fehler"
+    model = get_model(API_KEY)
+    if not model: return "API Fehler."
     try:
         audio_part = {"mime_type": "audio/wav", "data": audio_bytes}
-        prompt = (f"Du bist eine höfliche Verkäuferin in {sit} (Kansai-Region). "
-                  "Stefan (Mathelehrer) spricht per Audio zu dir. "
-                  "1. Transkribiere zuerst kurz, was Stefan gesagt hat (auf Deutsch/Japanisch). "
-                  "2. Antworte höflich, aber mit einem charmanten Kansai-Dialekt (Kansai-ben). "
-                  "FORMAT IMMER EXAKT SO:\n"
-                  "STEFAN: [Was du verstanden hast]\n"
-                  "JAPANISCH: [Deine Antwort]\n"
-                  "DEUTSCH: [Übersetzung]")
+        prompt = (f"Du bist Verkäuferin in {sit}. Stefan spricht. "
+                  "Sei extrem höflich, nutze nur ganz dezent Kansai-Akzent. "
+                  "Transkribiere zuerst Stefans Japanisch/Deutsch. "
+                  "FORMAT: STEFAN: [Text] JAPANISCH: [Antwort] DEUTSCH: [Übersetzung]")
         res = model.generate_content([prompt, audio_part])
         return res.text
-    except Exception as e: return f"API Fehler: {str(e)}"
+    except Exception as e:
+        if "429" in str(e): return "Limit erreicht. Bitte 1 Min warten."
+        return f"Fehler: {str(e)}"
 
 # --- UI ---
-st.title("🇯🇵 Sensei Stefan: Kansai Edition")
+st.title("🇯🇵 Japan-Trainer: Ashiya")
 
 with st.sidebar:
-    st.markdown("### 📍 Location")
-    situation = st.selectbox("Ort:", ["Metzgerei Takezono", "McDonald's Ashiya", "Bus Arima Onsen"], key="sit_v12")
-    if st.button("Gespräch zurücksetzen"):
+    situation = st.selectbox("Ort:", ["Metzgerei Takezono", "McDonald's Ashiya", "Bus Arima Onsen"])
+    if st.button("Verlauf löschen"):
         st.session_state.chat = []
         st.session_state.last_audio_hash = None
         st.rerun()
 
-st.write(f"Du bist gerade in: **{situation}**")
+# Verlauf Chronologisch
+for i, msg in enumerate(st.session_state.chat):
+    st.divider()
+    
+    stefan_text = ""
+    jp_text = ""
+    if "STEFAN:" in msg and "JAPANISCH:" in msg:
+        stefan_text = msg.split("STEFAN:")[1].split("JAPANISCH:")[0].strip()
+        jp_text = msg.split("JAPANISCH:")[1].split("DEUTSCH:")[0].strip()
 
-# Mikrofon
-audio_data = audio_recorder(text="", pause_threshold=4.0, key="mic_v12")
+    if stefan_text:
+        st.markdown(f'<div class="stefan-box">Stefan: "{stefan_text}"</div>', unsafe_allow_html=True)
+
+    if jp_text:
+        try:
+            tts = gTTS(text=jp_text, lang='ja')
+            b = io.BytesIO(); tts.write_to_fp(b)
+            b64 = base64.b64encode(b.getvalue()).decode()
+            is_new = (i == len(st.session_state.chat) - 1)
+            play_attr = "autoplay" if is_new else ""
+            st.markdown(f'<audio src="data:audio/mp3;base64,{b64}" controls {play_attr}></audio>', unsafe_allow_html=True)
+        except: pass
+
+    with st.expander("👁️ Antwort lesen"):
+        st.markdown(f'<div class="seller-box">{msg}</div>', unsafe_allow_html=True)
+
+# Mikrofon ganz unten
+st.write("---")
+audio_data = audio_recorder(text="", pause_threshold=3.0, icon_name="microphone", key="mic_v15")
 
 if audio_data is not None:
     curr_hash = hash(audio_data)
     if st.session_state.last_audio_hash != curr_hash:
-        st.session_state.last_audio_hash = curr_hash
-        with st.spinner("Höre zu..."):
+        st.session_state.last_audio_hash = current_hash
+        with st.spinner("..."):
             answer = talk_to_seller(audio_data, situation)
             st.session_state.chat.append(answer)
-
-# Chat Verlauf
-for msg in reversed(st.session_state.chat):
-    st.divider()
-    
-    # Trennung der KI-Antwort
-    parts = {"stefan": "", "japanisch": "", "full": msg}
-    if "STEFAN:" in msg and "JAPANISCH:" in msg:
-        parts["stefan"] = msg.split("STEFAN:")[1].split("JAPANISCH:")[0].strip()
-        parts["japanisch"] = msg.split("JAPANISCH:")[1].split("DEUTSCH:")[0].strip()
-
-    # 1. Was Stefan gesagt hat (Dezent anzeigen)
-    if parts["stefan"]:
-        st.markdown(f'<p class="stefan-box">Verstanden: "{parts["stefan"]}"</p>', unsafe_allow_html=True)
-
-    # 2. Audio der Verkäuferin
-    if parts["japanisch"]:
-        try:
-            tts = gTTS(text=parts["japanisch"], lang='ja')
-            b = io.BytesIO(); tts.write_to_fp(b)
-            b64 = base64.b64encode(b.getvalue()).decode()
-            st.markdown(f'<audio src="data:audio/mp3;base64,{b64}" controls autoplay></audio>', unsafe_allow_html=True)
-        except: pass
-
-    # 3. Antwort-Text hinter Expander
-    with st.expander("👁️ Antwort der Verkäuferin (Kansai-ben)"):
-        st.markdown(f'<div class="seller-box">{msg}</div>', unsafe_allow_html=True)
-
-st.divider()
+            st.rerun()
