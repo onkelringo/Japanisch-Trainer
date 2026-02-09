@@ -3,20 +3,21 @@ import google.generativeai as genai
 from gtts import gTTS
 import io
 
-# 1. Einfaches, stabiles Design
+# 1. Grundkonfiguration
 st.set_page_config(page_title="Stefans Japan-Trainer", page_icon="🇯🇵")
 
-# Korrektur der CSS-Zeile (jetzt fehlerfrei)
+# XXL-Design für iPhone/iPad (Großer Audio-Player & Schrift)
 st.markdown("""
     <style>
-    audio { width: 100% !important; height: 45px; }
-    .stMarkdown p { font-size: 1.1rem !important; }
+    audio { width: 100% !important; height: 50px; }
+    .stMarkdown p { font-size: 1.2rem !important; }
+    .stButton button { width: 100%; }
     </style>
     """, unsafe_allow_html=True)
 
 st.title("🏯 Stefans Japan-Trainer")
 
-# 2. Sidebar für API-Key und Orte
+# 2. Seitenleiste (Sidebar)
 st.sidebar.header("Einstellungen")
 api_key = st.sidebar.text_input("Gemini API Key", type="password")
 
@@ -30,50 +31,54 @@ situation = st.sidebar.radio(
     ["Metzgerei Takezono", "McDonald's Ashiya", "Bus nach Arima Onsen"]
 )
 
-# 3. KI-Verbindung
+# 3. KI-Verbindung (Fix für TypeError)
 genai.configure(api_key=api_key)
 
 @st.cache_resource
 def get_model():
     try:
-        # Sucht das erste Modell, das Content generieren kann
-        model_list = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
-        # Wir nehmen das erste verfügbare (meist gemini-1.5-flash oder gemini-pro)
-        return genai.GenerativeModel(model_list[0])
+        # Wir holen die Liste und nehmen EXAKT das erste Element (String)
+        model_namen = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
+        if model_namen:
+            # WICHTIG: [0] stellt sicher, dass es ein Text ist, keine Liste!
+            return genai.GenerativeModel(model_namen[0])
+        return None
     except Exception as e:
-        st.error(f"KI-Verbindungsfehler: {e}")
+        st.error(f"Verbindungsfehler: {e}")
         return None
 
 model = get_model()
 
-# 4. System Prompt (Klarer Befehl an die KI)
+# 4. System-Anweisung (Prompt)
 SYSTEM_PROMPT = (
     f"Du bist ein Mitarbeiter bei: {situation}. "
     "Dein Gesprächspartner ist Stefan (48, Mathelehrer). "
-    "Antworte IMMER exakt in diesem Format:\n\n"
-    "JAPANISCH: [Hier der japanische Satz]\n"
-    "DEUTSCH: [Hier die Übersetzung oder Korrektur]\n"
+    "Antworte IMMER in diesem Format:\n\n"
+    "JAPANISCH: [Satz]\n"
+    "DEUTSCH: [Übersetzung/Korrektur]\n"
 )
 
-# 5. Stabile Audio-Funktion
+# 5. Stabile Audio-Funktion (Fix für Split-Error)
 def erzeuge_audio(text):
     try:
-        # Wir filtern den japanischen Teil für die Sprachausgabe
+        # Wir filtern nur den japanischen Teil heraus
         if "DEUTSCH:" in text:
-            jp_clean = text.split("DEUTSCH:")[0]
+            # Nimm alles VOR "DEUTSCH:"
+            jp_teil = text.split("DEUTSCH:")[0]
         else:
-            jp_clean = text
+            jp_teil = text
         
-        jp_clean = jp_clean.replace("JAPANISCH:", "").strip()
+        # Entferne das Label "JAPANISCH:" für die Sprachausgabe
+        jp_sauber = jp_teil.replace("JAPANISCH:", "").strip()
         
-        if not jp_clean:
+        if not jp_sauber:
             return None
 
-        tts = gTTS(text=jp_clean, lang='ja')
+        tts = gTTS(text=jp_sauber, lang='ja')
         audio_io = io.BytesIO()
         tts.write_to_fp(audio_io)
         return audio_io.getvalue()
-    except:
+    except Exception:
         return None
 
 # 6. Chat-Logik
@@ -85,6 +90,7 @@ if "last_sit" not in st.session_state or st.session_state.last_sit != situation:
     st.session_state.messages = []
     st.session_state.last_sit = situation
 
+# Verlauf anzeigen
 for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
         st.write(msg["content"])
@@ -104,10 +110,13 @@ if user_input := st.chat_input("Schreib Stefan..."):
             st.write(ai_text)
             
             # Audio erzeugen
-            audio_data = erzeuge_audio(ai_text)
-            if audio_data:
-                st.audio(audio_data, format="audio/mp3")
+            audio_daten = erzeuge_audio(ai_text)
+            if audio_daten:
+                st.audio(audio_daten, format="audio/mp3")
             
             st.session_state.messages.append({"role": "assistant", "content": ai_text})
         except Exception as e:
-            st.error(f"Antwort-Fehler: {e}")
+            st.error(f"Fehler: {e}")
+
+st.sidebar.divider()
+st.sidebar.write(f"Aktuelle Szene: **{situation}**")
