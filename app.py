@@ -4,119 +4,114 @@ from gtts import gTTS
 import io
 import base64
 
-# 1. iPad Pro Optimierung (Kein unsichtbarer Code!)
-st.set_page_config(page_title="Japanisch Trainer", layout="wide")
+# --- CONFIG & STYLE ---
+st.set_page_config(page_title="Sensei Stefan's Japan-Trainer", layout="wide")
 
 st.markdown("""
     <style>
-    /* XXL Schrift für das 12,9" Display */
-    .stMarkdown p { font-size: 1.6rem !important; line-height: 1.7; }
-    /* Großer Audio-Player */
-    audio { width: 100% !important; height: 60px !important; margin: 15px 0; }
-    /* Chat-Eingabe deutlich sichtbar machen */
-    .stChatInput input { font-size: 1.5rem !important; padding: 15px !important; border: 2px solid #ff4b4b !important; }
+    .stApp { background-color: #f0f2f6; }
+    .stMarkdown p { font-size: 1.4rem !important; }
+    audio { width: 100%; border-radius: 10px; margin: 10px 0; border: 2px solid #ff4b4b; }
+    .stChatInput { bottom: 20px !important; }
     </style>
-    """, unsafe_allow_html=True)
+""", unsafe_allow_html=True)
 
-st.title("🇯🇵 Japanisch Trainer")
-
-# 2. Sidebar & KI Setup
-st.sidebar.header("Einstellungen")
-api_key = st.sidebar.text_input("Gemini API Key", type="password")
-
-if not api_key:
-    st.info("Bitte gib zuerst links deinen API-Key ein, Stefan.")
-    st.stop()
-
-# Ortswahl (Startpunkt)
-st.sidebar.divider()
-situation = st.sidebar.selectbox(
-    "Wähle deine Situation zum Starten:",
-    ["Bitte wählen...", "Metzgerei Takezono", "McDonald's Ashiya", "Bus nach Arima Onsen"]
-)
-
-if situation == "Bitte wählen...":
-    st.warning("Wähle links in der Liste einen Ort aus, um das Gespräch zu beginnen!")
-    st.stop()
-
-# KI-Verbindung
-genai.configure(api_key=api_key)
-
-@st.cache_resource
-def get_model():
-    try:
-        model_namen = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
-        if model_namen:
-            # WICHTIG: Nimmt das erste verfügbare Modell als String
-            return genai.GenerativeModel(model_namen[0])
-        return None
-    except Exception as e:
-        st.error(f"Verbindungsfehler: {e}")
-        return None
-
-model = get_model()
-
-# 3. Audio-Funktion (Base64 für iPad Safari)
-def erzeuge_audio_html(text):
-    try:
-        if "JAPANISCH:" in text:
-            jp_teil = text.split("JAPANISCH:")[1].split("DEUTSCH:")[0].strip()
-        else:
-            jp_teil = text
-        
-        tts = gTTS(text=jp_teil, lang='ja')
-        audio_io = io.BytesIO()
-        tts.write_to_fp(audio_io)
-        b64 = base64.b64encode(audio_io.getvalue()).decode()
-        
-        return f'<audio controls autoplay style="width:100%; height:60px;"><source src="data:audio/mp3;base64,{b64}" type="audio/mp3"></audio>'
-    except: return None
-
-# 4. Chat-Logik & Automatische Begrüßung
+# --- INITIALISIERUNG ---
 if "messages" not in st.session_state:
     st.session_state.messages = []
+if "current_sit" not in st.session_state:
+    st.session_state.current_sit = None
 
-if "current_sit" not in st.session_state or st.session_state.current_sit != situation:
-    st.session_state.current_sit = situation
-    st.session_state.messages = [] # Reset bei neuem Ort
+# --- SIDEBAR ---
+with st.sidebar:
+    st.title("⛩️ Training-Center")
+    api_key = st.text_input("Gemini API Key", type="password")
     
-    # Die KI startet das Gespräch
-    welcome_prompt = (
-        f"Du bist ein Mitarbeiter bei {situation}. Stefan (48, Mathelehrer) betritt gerade den Ort. "
-        "Begrüße ihn höflich auf Japanisch und frage ihn, was er möchte. "
-        "Antworte IMMER so:\nJAPANISCH: [Satz]\nDEUTSCH: [Übersetzung]"
+    situation = st.selectbox(
+        "Wo willst du glänzen, Stefan?",
+        ["Bitte wählen...", "Metzgerei Takezono (Beef-Time)", "McDonald's Ashiya (Burger-Check)", "Bus nach Arima Onsen (Roadtrip)"]
     )
     
-    try:
-        response = model.generate_content(welcome_prompt)
-        st.session_state.messages.append({"role": "assistant", "content": response.text})
-    except:
-        st.error("KI-Dienst momentan nicht erreichbar.")
+    if st.button("Gespräch neu starten"):
+        st.session_state.messages = []
+        st.session_state.current_sit = None
+        st.rerun()
 
-# Chat Verlauf anzeigen
+if not api_key:
+    st.warning("Ohne Key läuft hier nichts, Sensei!")
+    st.stop()
+
+# --- KI SETUP ---
+genai.configure(api_key=api_key)
+
+def get_chat_response(prompt):
+    try:
+        # Wir nutzen flash für die Geschwindigkeit auf dem iPad
+        model = genai.GenerativeModel('gemini-1.5-flash')
+        response = model.generate_content(prompt)
+        return response.text
+    except Exception as e:
+        return f"Fehler: {str(e)}"
+
+def play_audio(text):
+    try:
+        # Extrahiere nur den japanischen Teil für die Sprachausgabe
+        if "JAPANISCH:" in text:
+            jp_text = text.split("JAPANISCH:")[1].split("DEUTSCH:")[0].strip()
+        else:
+            jp_text = text
+        
+        tts = gTTS(text=jp_text, lang='ja')
+        fp = io.BytesIO()
+        tts.write_to_fp(fp)
+        b64 = base64.b64encode(fp.getvalue()).decode()
+        html_elt = f'<audio src="data:audio/mp3;base64,{b64}" controls autoplay></audio>'
+        st.markdown(html_elt, unsafe_allow_html=True)
+    except:
+        st.error("Audio-Sensei macht gerade Pause.")
+
+# --- LOGIK ---
+if situation != "Bitte wählen..." and situation != st.session_state.current_sit:
+    st.session_state.current_sit = situation
+    st.session_state.messages = [] # Reset bei Ortswechsel
+    
+    # Frecher Start-Prompt
+    start_prompt = (
+        f"Du bist ein Angestellter bei {situation}. Stefan, ein deutscher Mathelehrer (48), betritt den Laden. "
+        "Begrüße ihn extrem höflich, aber baue eine winzige, freche Anspielung auf Mathematik oder deutsches Lehrer-Dasein ein. "
+        "Format: JAPANISCH: [Text]\nDEUTSCH: [Übersetzung]"
+    )
+    initial_msg = get_chat_response(start_prompt)
+    st.session_state.messages.append({"role": "assistant", "content": initial_msg})
+
+# --- UI ANZEIGE ---
+st.title(f"📍 {st.session_state.current_sit or 'Wähle einen Ort'}")
+
 for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
         st.write(msg["content"])
         if msg["role"] == "assistant":
-            player = erzeuge_audio_html(msg["content"])
-            if player: st.markdown(player, unsafe_allow_html=True)
+            # Audio nur für die letzte Nachricht automatisch abspielen
+            if msg == st.session_state.messages[-1]:
+                play_audio(msg["content"])
 
-# 5. Die Tastatur-Eingabe (Standard Streamlit Chat Input)
-if user_input := st.chat_input("Tippe hier und nutze das Tastatur-Mikrofon..."):
+# --- INPUT ---
+if user_input := st.chat_input("Hau was raus, Sensei Stefan..."):
     st.session_state.messages.append({"role": "user", "content": user_input})
     
-    # Prompt für Stefan als Mathelehrer
-    SYSTEM_PROMPT = (
-        f"Du bist Mitarbeiter bei {situation}. Stefan (Mathelehrer) spricht Japanisch. "
-        "Antworte IMMER so:\n"
-        "STEFAN SAGTE (AUF DEUTSCH): [Übersetzung von Stefan]\n"
+    # System Prompt für die laufende Konversation
+    system_instruction = (
+        f"Du bist der Angestellte bei {situation}. Stefan antwortet dir. "
+        "Bleib in deiner Rolle. Sei höflich, aber 'Gen-Z-Japanisch-frech'. "
+        "Wenn er einen Fehler macht, korrigiere ihn charmant (wie ein Mathelehrer, der einen Vorzeichenfehler findet). "
+        "ANTWORTE IMMER IN DIESEM FORMAT:\n"
+        "STEFAN SAGTE (AUF DEUTSCH): [Was er wohl meinte]\n"
         "JAPANISCH: [Deine Antwort]\n"
         "DEUTSCH: [Übersetzung deiner Antwort]"
     )
     
-    try:
-        response = model.generate_content(f"{SYSTEM_PROMPT}\nStefan sagt: {user_input}")
-        st.session_state.messages.append({"role": "assistant", "content": response.text})
-        st.rerun() 
-    except Exception as e:
-        st.error(f"Fehler: {e}")
+    full_prompt = f"{system_instruction}\nStefan sagt: {user_input}"
+    with st.spinner("Überlege..."):
+        ai_response = get_chat_response(full_prompt)
+        st.session_state.messages.append({"role": "assistant", "content": ai_response})
+    st.rerun()
