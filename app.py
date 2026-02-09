@@ -8,7 +8,7 @@ import base64
 # --- 1. APP CONFIG ---
 st.set_page_config(page_title="Onkel Ringos Lernapp", layout="wide")
 
-# --- 2. KANAGAWA DESIGN (Blau, Beige, Rot) ---
+# --- 2. KANAGAWA DESIGN ---
 st.markdown("""
 <style>
     .stApp { background-color: #f4e7d3 !important; color: #002b5b !important; }
@@ -43,33 +43,47 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# --- 3. API & MODELL-WAHL (LIMIT-FIX) ---
+# --- 3. INTELLIGENTE MODELL-FINDUNG (FIX FÜR 404) ---
 API_KEY = st.secrets.get("GEMINI_API_KEY")
 
 @st.cache_resource
-def load_stable_model(key):
+def get_working_model(key):
     if not key: return None
     genai.configure(api_key=key)
-    # Wir nehmen 1.5-Flash (höheres Limit als 2.0)
-    return genai.GenerativeModel('gemini-1.5-flash')
+    # Liste der möglichen Bezeichnungen für das stabile Flash-Modell
+    model_candidates = [
+        'gemini-1.5-flash', 
+        'models/gemini-1.5-flash', 
+        'gemini-1.5-flash-latest',
+        'gemini-pro'
+    ]
+    
+    for name in model_candidates:
+        try:
+            model = genai.GenerativeModel(name)
+            # Kleiner Test-Aufruf um Gültigkeit zu prüfen
+            model.generate_content("Hi", generation_config={"max_output_tokens": 1})
+            return model
+        except:
+            continue
+    return None
 
 if "chat" not in st.session_state: st.session_state.chat = []
 if "last_audio_id" not in st.session_state: st.session_state.last_audio_id = None
 
 def get_rollenspiel_antwort(audio_bytes, location):
-    model = load_stable_model(API_KEY)
-    if not model: return "Fehler: Key fehlt!"
+    model = get_working_model(API_KEY)
+    if not model: return "Fehler: Kein Modell (z.B. gemini-1.5-flash) unter deinem API-Key gefunden."
     try:
         audio_part = {"mime_type": "audio/wav", "data": audio_bytes}
         prompt = (f"Du bist eine japanische Verkäuferin in {location}. Stefan ist Kunde. "
                   "Verhalte dich absolut echt: Sei höflich, reagiere auf ihn und stelle IMMER eine "
                   "Gegenfrage (Menge, Tüte, Bezahlung). "
-                  "FORMAT: STEFAN: [Was er sagte] JAPANISCH: [Deine Antwort + Frage] DEUTSCH: [Übersetzung]")
-        # Kein Verlauf senden um Quota zu sparen
+                  "FORMAT: STEFAN: [Transkript] JAPANISCH: [Antwort + Frage] DEUTSCH: [Übersetzung]")
         res = model.generate_content([prompt, audio_part])
         return res.text
     except Exception as e:
-        if "429" in str(e): return "LIMIT: Bitte 60 Sek. warten."
+        if "429" in str(e): return "Limit erreicht (429). Bitte 60 Sek. warten."
         return f"Fehler: {str(e)}"
 
 # --- 4. UI ---
@@ -110,7 +124,7 @@ for i, msg in enumerate(st.session_state.chat):
 # Mikrofon
 st.write("---")
 st.write("### 🎤 Deine Antwort (Sprechen):")
-rec_audio = audio_recorder(text="", icon_size="3x", pause_threshold=3.0, key="mic_v26_fixed")
+rec_audio = audio_recorder(text="", icon_size="3x", pause_threshold=3.0, key="mic_v27_final")
 
 if rec_audio and rec_audio != st.session_state.last_audio_id:
     st.session_state.last_audio_id = rec_audio
