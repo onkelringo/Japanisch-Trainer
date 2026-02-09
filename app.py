@@ -4,88 +4,113 @@ from gtts import gTTS
 import io
 
 # 1. Seite konfigurieren
-st.set_page_config(page_title="Stefans Ashiya-Trainer", page_icon="🍱")
-st.title("🏯 Ashiya-Japanisch-Trainer")
-st.markdown("Willkommen, Stefan! Dein persönlicher Sprachtrainer für Takezono.")
+st.set_page_config(page_title="Stefans Japan-Trainer", page_icon="🇯🇵")
+st.title("🏯 Stefans Japanisch-Trainer")
 
-# 2. API-Key Abfrage in der Seitenleiste
+# 2. Seitenleiste: Einstellungen & Situations-Wahl
 st.sidebar.header("Einstellungen")
-api_key = st.sidebar.text_input("Gemini API Key eingeben", type="password")
+api_key = st.sidebar.text_input("Gemini API Key", type="password")
 
 if not api_key:
-    st.info("Bitte gib deinen API-Key in der Seitenleiste ein, um zu starten.", icon="🔑")
+    st.info("Bitte gib deinen API-Key in der Seitenleiste ein.", icon="🔑")
     st.stop()
 
-# KI-Verbindung aufbauen
+# Situation auswählen
+st.sidebar.divider()
+st.sidebar.subheader("Wo bist du gerade?")
+situation = st.sidebar.radio(
+    "Wähle einen Ort:",
+    ["Metzgerei Takezono", "McDonald's Ashiya", "Bus nach Arima Onsen"]
+)
+
+# 3. KI-Modell laden
 genai.configure(api_key=api_key)
 
-# Dynamische Modellsuche, um den "NotFound"-Fehler zu vermeiden
 @st.cache_resource
 def get_model():
     try:
-        # Sucht das erste Modell, das Texte generieren kann (meist gemini-1.5-flash oder 1.0-pro)
+        # Sucht automatisch das beste verfügbare Modell
         models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
-        # Wir nehmen das erste verfügbare Modell aus der Liste
-        return genai.GenerativeModel(models[0])
-    except Exception as e:
-        st.error(f"Fehler beim Laden des Modells: {e}")
+        # Wir nehmen 'gemini-1.5-flash', falls in der Liste, sonst das erste
+        target = 'models/gemini-1.5-flash'
+        return genai.GenerativeModel(target if target in models else models[0])
+    except:
         return None
 
 model = get_model()
-
-if model is None:
+if not model:
+    st.error("Modell konnte nicht geladen werden. Prüfe deinen Key.")
     st.stop()
 
-# 3. Identität der KI (System-Prompt)
-SYSTEM_PROMPT = (
-    "Du bist die nette Verkäuferin aus der Metzgerei Takezono in Ashiya. "
-    "Dein Gesprächspartner heißt Stefan. Er ist 48 Jahre alt und Mathematiklehrer. "
-    "Antworte immer zuerst kurz und höflich auf Japanisch. "
-    "Danach korrigierst du Stefans Japanisch kurz auf Deutsch, falls er Fehler gemacht hat. "
-    "Sei immer sehr freundlich und nenne ihn gelegentlich 'Stefan-san'."
-)
+# 4. System-Prompts je nach Situation
+prompts = {
+    "Metzgerei Takezono": (
+        "Du bist die nette Verkäuferin der Metzgerei Takezono in Ashiya. "
+        "Stefan (48, Mathelehrer) möchte etwas kaufen (z.B. Renkon Korokke). "
+        "Antworte erst höflich auf Japanisch, dann korrigiere ihn auf Deutsch."
+    ),
+    "McDonald's Ashiya": (
+        "Du bist der Mitarbeiter bei McDonald's am Bahnhof Ashiya. "
+        "Du bist sehr effizient und höflich (Fast-Food-Keigo). "
+        "Frage Stefan nach seiner Bestellung (Set? Größe? Hier essen?). "
+        "Antworte erst auf Japanisch, dann Korrektur auf Deutsch."
+    ),
+    "Bus nach Arima Onsen": (
+        "Du bist der Busfahrer oder ein Mitarbeiter an der Bushaltestelle nach Arima Onsen. "
+        "Stefan möchte wissen, wann der Bus fährt oder wie viel es kostet. "
+        "Antworte erst auf Japanisch, dann Korrektur auf Deutsch."
+    )
+}
 
-# 4. Chat-Verlauf speichern
+aktueller_prompt = prompts[situation] + " Nenne ihn Stefan-san."
+
+# 5. Chat-Logik & Audio-Funktion
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
-# 5. Funktion für die Sprachausgabe
-def erzeuge_audio(text):
-    # gTTS liest den Text mit japanischer Stimme vor
-    tts = gTTS(text=text, lang='ja')
-    audio_buffer = io.BytesIO()
-    tts.write_to_fp(audio_buffer)
-    return audio_buffer
+# Falls die Situation gewechselt wird, Chat leeren (optional)
+if "last_situation" not in st.session_state:
+    st.session_state.last_situation = situation
 
-# 6. Chat-Anzeige
-for message in st.session_state.messages:
-    with st.chat_message(message["role"]):
-        st.markdown(message["content"])
+if st.session_state.last_situation != situation:
+    st.session_state.messages = []
+    st.session_state.last_situation = situation
 
-# 7. Eingabe-Logik
-if prompt := st.chat_input("Schreib der Dame von Takezono..."):
-    # Nutzerwunsch anzeigen
-    st.session_state.messages.append({"role": "user", "content": prompt})
+def sprich_japanisch(text):
+    try:
+        # Wir nehmen nur den japanischen Teil (vor der Korrektur) für die Stimme
+        japanischer_teil = text.split('\n')[0].split('---')[0]
+        tts = gTTS(text=japanischer_teil, lang='ja')
+        audio_io = io.BytesIO()
+        tts.write_to_fp(audio_io)
+        return audio_io
+    except:
+        return None
+
+# Chat anzeigen
+for msg in st.session_state.messages:
+    with st.chat_message(msg["role"]):
+        st.write(msg["content"])
+
+# Eingabe
+if user_input := st.chat_input(f"Sprich mit dem Personal ({situation})..."):
+    st.session_state.messages.append({"role": "user", "content": user_input})
     with st.chat_message("user"):
-        st.markdown(prompt)
+        st.write(user_input)
 
-    # Antwort von der KI generieren
-    voller_kontext = f"{SYSTEM_PROMPT}\n\nStefan sagt: {prompt}"
-    
+    # KI-Antwort
+    voller_kontext = f"{aktueller_prompt}\nStefan sagt: {user_input}"
     with st.chat_message("assistant"):
-        try:
-            response = model.generate_content(voller_kontext)
-            antwort_text = response.text
-            st.markdown(antwort_text)
-            
-            # Audio-Player einblenden
-            audio_daten = erzeuge_audio(antwort_text)
-            st.audio(audio_daten, format="audio/mp3")
-            
-            st.session_state.messages.append({"role": "assistant", "content": antwort_text})
-        except Exception as e:
-            st.error(f"Ein Fehler ist aufgetreten: {e}")
+        response = model.generate_content(voller_kontext)
+        antwort = response.text
+        st.write(antwort)
+        
+        # Sprachausgabe
+        audio = sprich_japanisch(antwort)
+        if audio:
+            st.audio(audio, format="audio/mp3")
+        
+        st.session_state.messages.append({"role": "assistant", "content": antwort})
 
-# Info für die Seitenleiste
 st.sidebar.divider()
-st.sidebar.write("Viel Erfolg beim Lernen, Stefan!")
+st.sidebar.info(f"Du bist jetzt: **{situation}**")
