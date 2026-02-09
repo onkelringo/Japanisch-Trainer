@@ -8,7 +8,7 @@ st.title("🏯 Stefan's Ashiya-Trainer")
 api_key = st.text_input("Gib deinen Gemini API Key ein:", type="password")
 
 if api_key:
-    genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
+    genai.configure(api_key=api_key)
     model = genai.GenerativeModel('gemini-pro')
 
     # Die Situation festlegen
