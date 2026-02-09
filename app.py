@@ -8,54 +8,25 @@ import base64
 # --- API SETUP ---
 API_KEY = st.secrets.get("GEMINI_API_KEY")
 
-# --- iPAD DESIGN FIX v11 ---
-st.set_page_config(page_title="Japan Trainer", layout="wide")
+# --- DESIGN SETUP ---
+st.set_page_config(page_title="Japan Trainer v12", layout="wide")
 
 st.markdown("""
     <style>
     .stApp { background-color: #0e1117; }
+    .main .block-container { max-width: 850px; padding: 1.5rem; margin: auto; }
     
-    /* Hauptbereich */
-    .main .block-container {
-        max-width: 850px !important;
-        padding: 1.5rem !important;
-        margin: auto;
+    /* Sidebar Styling */
+    section[data-testid="stSidebar"] { padding: 20px 10px; background-color: #161b22; }
+    section[data-testid="stSidebar"] .stMarkdown p, section[data-testid="stSidebar"] label {
+        font-size: 0.8rem !important; color: #aaa !important; margin-left: 10px;
     }
 
-    /* SIDEBAR: Kleiner und eingerückt */
-    section[data-testid="stSidebar"] {
-        padding: 20px 10px !important;
-        background-color: #161b22 !important;
-    }
-    
-    /* Sidebar Text & Labels verkleinern */
-    section[data-testid="stSidebar"] .stMarkdown p, 
-    section[data-testid="stSidebar"] label {
-        font-size: 0.85rem !important;
-        color: #aaa !important;
-        margin-left: 10px;
-    }
-
-    /* Selectbox und Button in der Sidebar schrumpfen */
-    section[data-testid="stSidebar"] .stSelectbox div[data-baseweb="select"] {
-        font-size: 0.8rem !important;
-        transform: scale(0.95);
-        margin-left: 5px;
-    }
-    
-    section[data-testid="stSidebar"] .stButton button {
-        font-size: 0.75rem !important;
-        height: 35px !important;
-        margin-left: 10px;
-    }
-
-    /* Antwort-Box der Verkäuferin */
+    /* Text-Boxen */
+    .stefan-box { font-size: 0.9rem; color: #888; font-style: italic; margin-bottom: 10px; }
     .seller-box { 
-        font-size: 1.3rem !important; 
-        color: #00ffcc; 
-        background: #1a1c23; 
-        padding: 18px; 
-        border-radius: 10px; 
+        font-size: 1.3rem !important; color: #00ffcc; background: #1a1c23; 
+        padding: 18px; border-radius: 10px; border-left: 4px solid #ff4b4b;
     }
 
     /* Mikrofon */
@@ -65,13 +36,13 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# --- MODELL FINDER ---
+# --- MODEL FINDER ---
 @st.cache_resource
 def get_working_model(api_key):
     try:
         genai.configure(api_key=api_key)
         available = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
-        for target in ['models/gemini-1.5-flash', 'models/gemini-1.5-pro', 'models/gemini-pro']:
+        for target in ['models/gemini-1.5-flash', 'models/gemini-pro']:
             if target in available: return genai.GenerativeModel(target)
         return genai.GenerativeModel(available[0]) if available else None
     except: return None
@@ -82,50 +53,70 @@ if "last_audio_hash" not in st.session_state: st.session_state.last_audio_hash =
 
 def talk_to_seller(audio_bytes, sit):
     model = get_working_model(API_KEY)
-    if not model: return "API Fehler: Kein Modell gefunden."
+    if not model: return "API Fehler"
     try:
         audio_part = {"mime_type": "audio/wav", "data": audio_bytes}
-        prompt = (f"Du bist Verkäuferin bei {sit}. Antworte kurz und frech auf Japanisch. "
-                  "FORMAT: JAPANISCH: [Satz] DEUTSCH: [Übersetzung]")
+        prompt = (f"Du bist eine höfliche Verkäuferin in {sit} (Kansai-Region). "
+                  "Stefan (Mathelehrer) spricht per Audio zu dir. "
+                  "1. Transkribiere zuerst kurz, was Stefan gesagt hat (auf Deutsch/Japanisch). "
+                  "2. Antworte höflich, aber mit einem charmanten Kansai-Dialekt (Kansai-ben). "
+                  "FORMAT IMMER EXAKT SO:\n"
+                  "STEFAN: [Was du verstanden hast]\n"
+                  "JAPANISCH: [Deine Antwort]\n"
+                  "DEUTSCH: [Übersetzung]")
         res = model.generate_content([prompt, audio_part])
         return res.text
     except Exception as e: return f"API Fehler: {str(e)}"
 
 # --- UI ---
-st.title("🇯🇵 Sensei Stefan")
+st.title("🇯🇵 Sensei Stefan: Kansai Edition")
 
 with st.sidebar:
-    st.markdown("### 📍 Menü")
-    situation = st.selectbox("Ort wählen:", ["Metzgerei Takezono", "McDonald's Ashiya", "Bus Arima Onsen"], key="sit_v11")
-    st.markdown("---")
-    if st.button("Chat löschen"):
+    st.markdown("### 📍 Location")
+    situation = st.selectbox("Ort:", ["Metzgerei Takezono", "McDonald's Ashiya", "Bus Arima Onsen"], key="sit_v12")
+    if st.button("Gespräch zurücksetzen"):
         st.session_state.chat = []
         st.session_state.last_audio_hash = None
         st.rerun()
 
-st.write(f"Ort: **{situation}**")
+st.write(f"Du bist gerade in: **{situation}**")
 
 # Mikrofon
-audio_data = audio_recorder(text="", pause_threshold=4.0, key="mic_v11")
+audio_data = audio_recorder(text="", pause_threshold=4.0, key="mic_v12")
 
 if audio_data is not None:
     curr_hash = hash(audio_data)
     if st.session_state.last_audio_hash != curr_hash:
         st.session_state.last_audio_hash = curr_hash
-        with st.spinner("..."):
+        with st.spinner("Höre zu..."):
             answer = talk_to_seller(audio_data, situation)
             st.session_state.chat.append(answer)
 
 # Chat Verlauf
 for msg in reversed(st.session_state.chat):
     st.divider()
-    try:
-        jp = msg.split("JAPANISCH:")[1].split("DEUTSCH:")[0].strip() if "JAPANISCH:" in msg else msg
-        tts = gTTS(text=jp, lang='ja')
-        b = io.BytesIO(); tts.write_to_fp(b)
-        b64 = base64.b64encode(b.getvalue()).decode()
-        st.markdown(f'<audio src="data:audio/mp3;base64,{b64}" controls autoplay></audio>', unsafe_allow_html=True)
-    except: pass
+    
+    # Trennung der KI-Antwort
+    parts = {"stefan": "", "japanisch": "", "full": msg}
+    if "STEFAN:" in msg and "JAPANISCH:" in msg:
+        parts["stefan"] = msg.split("STEFAN:")[1].split("JAPANISCH:")[0].strip()
+        parts["japanisch"] = msg.split("JAPANISCH:")[1].split("DEUTSCH:")[0].strip()
 
-    with st.expander("👁️ Antwort lesen"):
+    # 1. Was Stefan gesagt hat (Dezent anzeigen)
+    if parts["stefan"]:
+        st.markdown(f'<p class="stefan-box">Verstanden: "{parts["stefan"]}"</p>', unsafe_allow_html=True)
+
+    # 2. Audio der Verkäuferin
+    if parts["japanisch"]:
+        try:
+            tts = gTTS(text=parts["japanisch"], lang='ja')
+            b = io.BytesIO(); tts.write_to_fp(b)
+            b64 = base64.b64encode(b.getvalue()).decode()
+            st.markdown(f'<audio src="data:audio/mp3;base64,{b64}" controls autoplay></audio>', unsafe_allow_html=True)
+        except: pass
+
+    # 3. Antwort-Text hinter Expander
+    with st.expander("👁️ Antwort der Verkäuferin (Kansai-ben)"):
         st.markdown(f'<div class="seller-box">{msg}</div>', unsafe_allow_html=True)
+
+st.divider()
