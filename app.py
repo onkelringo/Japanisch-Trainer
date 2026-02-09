@@ -3,87 +3,78 @@ import google.generativeai as genai
 from gtts import gTTS
 import io
 import base64
-import time
 
-# 1. Design: Keine Tastatur, nur Dialog und Mikro-Button
+# 1. Design & Touch-Fix
 st.set_page_config(page_title="Japanisch Trainer", layout="wide")
 
 st.markdown("""
     <style>
-    /* Entfernt das Standard-Eingabefeld komplett */
-    [data-testid="stChatInput"] {
-        display: none;
-    }
+    /* Tastaturfeld verstecken */
+    [data-testid="stChatInput"] { display: none; }
     
+    /* XXL Text für iPad Pro */
     .stMarkdown p { font-size: 1.6rem !important; }
-    audio { width: 100% !important; height: 50px !important; }
     
-    /* Der große Mikrofon-Button oben rechts */
-    .mic-float {
-        position: fixed;
-        top: 20px;
-        right: 20px;
-        background-color: #ff4b4b;
-        color: white;
-        border-radius: 50%;
-        width: 100px;
-        height: 100px;
+    /* Großer Mikrofon-Button, der direkt im Content sitzt */
+    .mic-area {
         display: flex;
         justify-content: center;
-        align-items: center;
-        font-size: 45px;
-        box-shadow: 0 6px 15px rgba(0,0,0,0.4);
-        z-index: 999999;
-        cursor: pointer;
-        border: 4px solid white;
+        padding: 20px;
+        background-color: #f0f2f6;
+        border-radius: 20px;
+        margin-bottom: 20px;
+    }
+    .mic-btn {
+        background-color: #ff4b4b;
+        color: white;
+        border: none;
+        border-radius: 50%;
+        width: 120px;
+        height: 120px;
+        font-size: 50px;
+        box-shadow: 0 8px 20px rgba(0,0,0,0.2);
     }
     </style>
-    
+    """, unsafe_allow_html=True)
+
+# JavaScript Funktion für den Button-Klick
+def start_mic_html():
+    return f"""
     <script>
-    function startListening() {
+    function startListening() {{
         const recognition = new (window.SpeechRecognition || window.webkitSpeechRecognition)();
         recognition.lang = 'ja-JP';
         recognition.start();
-
-        recognition.onresult = (event) => {
+        recognition.onresult = (event) => {{
             const text = event.results[0].transcript;
-            // Schickt den erkannten Text als URL-Parameter an Streamlit zurück
             const url = new URL(window.location.href);
             url.searchParams.set('voice_input', text);
-            window.location.href = url.href;
-        };
-    }
+            window.parent.location.href = url.href;
+        }};
+    }}
     </script>
-    
-    <button class="mic-float" onclick="startListening()">🎤</button>
-    """, unsafe_allow_html=True)
+    <div class="mic-area">
+        <button class="mic-btn" onclick="startListening()">🎤</button>
+    </div>
+    """
 
 st.title("🇯🇵 Japanisch Trainer")
-st.write("Tippe oben rechts auf das Mikrofon und sprich Japanisch.")
-
-# 2. Sidebar & KI Setup
 st.sidebar.header("Einstellungen")
 api_key = st.sidebar.text_input("Gemini API Key", type="password")
+
 if not api_key:
     st.info("Bitte API-Key in der Sidebar eingeben.")
     st.stop()
 
+# KI Setup
 genai.configure(api_key=api_key)
-
-@st.cache_resource
-def get_model():
-    return genai.GenerativeModel('gemini-1.5-flash')
-
-model = get_model()
+model = genai.GenerativeModel('gemini-1.5-flash')
 situation = st.sidebar.radio("Situation:", ["Metzgerei Takezono", "McDonald's Ashiya", "Bus nach Arima Onsen"])
 
-# 3. Audio-Funktion
+# Audio-Funktion
 def erzeuge_audio_html(text):
     try:
-        if "JAPANISCH:" in text:
-            jp_part = text.split("JAPANISCH:")[1].split("DEUTSCH:")[0].strip()
-        else:
-            jp_part = text
+        jp_part = text.split("JAPANISCH:")[1].split("DEUTSCH:")[0].strip() if "JAPANISCH:" in text else text
         tts = gTTS(text=jp_part, lang='ja')
         audio_io = io.BytesIO()
         tts.write_to_fp(audio_io)
@@ -91,38 +82,31 @@ def erzeuge_audio_html(text):
         return f'<audio controls autoplay style="width:100%;"><source src="data:audio/mp3;base64,{b64}" type="audio/mp3"></audio>'
     except: return ""
 
-# 4. Chat Logik & Voice-Input Verarbeitung
+# Mikrofon-Button ganz oben anzeigen
+st.components.v1.html(start_mic_html(), height=200)
+
+# Chat-Verarbeitung
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
-# Prüfen, ob eine Spracheingabe über die URL reinkommt
+# Voice Input aus URL lesen
 query_params = st.query_params
-user_input = query_params.get("voice_input")
-
-if user_input:
-    # URL Parameter sofort löschen, damit kein Loop entsteht
-    st.query_params.clear()
+if "voice_input" in query_params:
+    user_text = query_params["voice_input"]
+    st.query_params.clear() # Parameter löschen
     
-    st.session_state.messages.append({"role": "user", "content": user_input})
+    st.session_state.messages.append({"role": "user", "content": user_text})
     
-    # Prompt bauen
-    SYSTEM_PROMPT = (
-        f"Du bist Mitarbeiter bei {situation}. Stefan (48, Mathelehrer) spricht Japanisch. "
-        "Antworte IMMER exakt so:\n\n"
-        "STEFAN SAGTE (AUF DEUTSCH): [Übersetzung]\n"
-        "JAPANISCH: [Antwort]\n"
-        "DEUTSCH: [Übersetzung]"
-    )
+    prompt = f"Du bist Mitarbeiter bei {situation}. Stefan (48, Mathelehrer) sagt: {user_text}. Antworte so: STEFAN SAGTE (AUF DEUTSCH): [Übersetzung] JAPANISCH: [Antwort] DEUTSCH: [Übersetzung]"
     
-    # KI Antwort generieren (mit kurzem Retry für 429er Fehler)
     try:
-        response = model.generate_content(f"{SYSTEM_PROMPT}\nStefan: {user_input}")
+        response = model.generate_content(prompt)
         st.session_state.messages.append({"role": "assistant", "content": response.text})
-    except Exception as e:
-        st.error("Google drosselt gerade (429). Bitte kurz warten.")
+    except:
+        st.error("Fehler 429 - Bitte kurz warten.")
 
-# Chat anzeigen
-for msg in st.session_state.messages:
+# Chat Verlauf (Neueste Nachricht oben)
+for msg in reversed(st.session_state.messages):
     with st.chat_message(msg["role"]):
         st.write(msg["content"])
         if msg["role"] == "assistant":
