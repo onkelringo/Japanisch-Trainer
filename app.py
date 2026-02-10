@@ -5,144 +5,123 @@ from gtts import gTTS
 import io
 import base64
 
-# --- 1. INITIALISIERUNG & DESIGN ---
+# --- 1. INITIALISIERUNG ---
 st.set_page_config(page_title="Onkel Ringos Japan-Training", layout="wide")
 
 st.markdown("""
 <style>
     .stApp { background-color: #f4e7d3 !important; }
-    h1 { color: #002b5b !important; border-bottom: 5px solid #bc002d !important; padding-bottom: 10px; }
-    
+    h1 { color: #002b5b !important; border-bottom: 5px solid #bc002d !important; }
     .seller-bubble { 
-        font-size: 1.2rem !important; color: #ffffff !important; 
-        background-color: #002b5b !important; padding: 20px; 
-        border-radius: 0 20px 20px 20px; border-left: 10px solid #bc002d;
-        margin: 15px 0; box-shadow: 4px 4px 10px rgba(0,0,0,0.1);
+        font-size: 1.1rem !important; color: #ffffff !important; 
+        background-color: #002b5b !important; padding: 15px; 
+        border-radius: 15px; border-left: 8px solid #bc002d;
+        margin: 10px 0;
     }
-    
-    .stefan-text { font-size: 1.1rem; color: #bc002d; font-weight: bold; margin-top: 20px; }
-
+    .stefan-text { font-size: 1rem; color: #bc002d; font-weight: bold; margin-top: 15px; }
     /* Mikrofon-Zentrierung */
     div[data-testid="stVerticalBlock"] > div:has(svg) {
         display: flex !important; justify-content: center !important; 
-        transform: scale(1.5); margin: 30px 0 !important;
+        transform: scale(1.3); margin: 20px 0 !important;
     }
 </style>
 """, unsafe_allow_html=True)
 
-# --- 2. KI MODELL KONFIGURATION ---
+# --- 2. KI MODELL ---
 @st.cache_resource
 def get_model():
     api_key = st.secrets.get("GEMINI_API_KEY")
-    if not api_key:
-        st.error("API Key fehlt in den Secrets!")
-        return None
+    if not api_key: return None
     genai.configure(api_key=api_key)
-    # Nutze das stabile Flash-Modell für schnelle Antworten
     return genai.GenerativeModel('gemini-1.5-flash')
 
 # --- 3. SESSION STATE ---
-if "chat_history" not in st.session_state:
-    st.session_state.chat_history = []  # Für den KI-Kontext
-if "display_history" not in st.session_state:
-    st.session_state.display_history = []  # Für die UI-Anzeige
-if "last_audio_hash" not in st.session_state:
-    st.session_state.last_audio_hash = None
+if "chat_history" not in st.session_state: st.session_state.chat_history = []
+if "display_history" not in st.session_state: st.session_state.display_history = []
+if "last_hash" not in st.session_state: st.session_state.last_hash = None
 
 def ask_ai(audio_bytes, ort):
     model = get_model()
-    if not model: return "Fehler: Keine API Verbindung."
+    if not model: return "API Fehler"
     
     system_instruction = (
-        f"Du bist eine sehr höfliche japanische Verkäuferin in {ort}. Stefan ist ein Ausländer, der Japanisch lernt. "
-        "DEIN VERHALTEN: "
-        "1. Sei herzlich und geduldig (Omotenashi-Stil). "
-        "2. Antworte in einfachem Japanisch, maximal 2 Sätze pro Antwort. "
-        "3. Stelle am Ende IMMER genau EINE höfliche Frage, um das Gespräch voranzubringen. "
-        "4. ABLAUF: Begrüßung -> Herkunft klären -> Bestellung aufnehmen -> Zubereitung/Warten (O-machido-sama) -> Abschied/Smalltalk. "
-        "FORMAT DER ANTWORT (STRENG EINHALTEN): "
-        "STEFAN: [Was er auf Deutsch oder Japanisch gesagt hat] "
-        "JAPANISCH: [Deine Antwort + Frage auf Japanisch] "
-        "DEUTSCH: [Übersetzung deiner Antwort]"
+        f"Du bist eine japanische Verkäuferin in {ort}. Stefan ist Ausländer und lernt Japanisch. "
+        "REGELEINHALTUNG: "
+        "1. Sei extrem höflich, aber sprich einfaches Japanisch. "
+        "2. Antworte in maximal 2 Sätzen. "
+        "3. Stelle IMMER genau EINE Frage am Ende. "
+        "4. ABLAUF: Begrüßung -> Herkunft -> Bestellung -> 'O-machido-sama' -> Smalltalk (Dauer des Aufenthalts). "
+        "FORMAT: STEFAN: [Was er sagte] JAPANISCH: [Antwort + Frage] DEUTSCH: [Übersetzung]"
     )
     
     try:
         audio_part = {"mime_type": "audio/wav", "data": audio_bytes}
-        # Wir übergeben die letzten 6 Nachrichten für den Kontext
-        content_to_send = [system_instruction] + st.session_state.chat_history[-6:] + [audio_part]
-        res = model.generate_content(content_to_send)
-        
-        # Antwort im Kontext speichern
+        res = model.generate_content([system_instruction] + st.session_state.chat_history[-6:] + [audio_part])
         st.session_state.chat_history.append(res.text)
         return res.text
     except Exception as e:
-        return f"Fehler bei der KI-Verarbeitung: {str(e)}"
+        return f"Fehler: {str(e)}"
 
-# --- 4. HAUPT-UI ---
+# --- 4. UI ---
 st.title("🏯 Rollenspiel: Japanische Verkäuferin")
 
 with st.sidebar:
-    st.write("### ⚙️ Einstellungen")
-    place = st.selectbox("Ort des Geschehens:", ["Metzgerei Takezono (Ashiya)", "McDonald's", "Kleiner Buchladen", "Arima Onsen Busstopp"])
-    if st.button("Gespräch zurücksetzen"):
+    place = st.selectbox("Ort:", ["Metzgerei Takezono", "McDonald's", "Busstation Arima Onsen"])
+    if st.button("Gespräch Neustarten"):
         st.session_state.chat_history = []
         st.session_state.display_history = []
-        st.session_state.last_audio_hash = None
+        st.session_state.last_hash = None
         st.rerun()
-    st.info("Tipp: Klicke auf das Schloss in der Browser-Leiste, um das Mikrofon dauerhaft zu erlauben.")
 
-# Chat-Verlauf anzeigen
+# Verlauf anzeigen
 for i, entry in enumerate(st.session_state.display_history):
-    # Parsing der Antwortteile
-    stefan_text = "..."
-    japanisch_text = ""
-    deutsch_text = ""
+    s_text = "..."
+    j_text = ""
+    d_text = ""
     
     if "STEFAN:" in entry and "JAPANISCH:" in entry:
-        stefan_text = entry.split("STEFAN:")[1].split("JAPANISCH:")[0].strip()
-        japanisch_text = entry.split("JAPANISCH:")[1].split("DEUTSCH:")[0].strip()
-        deutsch_text = entry.split("DEUTSCH:")[1].strip() if "DEUTSCH:" in entry else ""
+        s_text = entry.split("STEFAN:")[1].split("JAPANISCH:")[0].strip()
+        j_text = entry.split("JAPANISCH:")[1].split("DEUTSCH:")[0].strip()
+        d_text = entry.split("DEUTSCH:")[1].strip() if "DEUTSCH:" in entry else ""
 
-    # UI Block
-    st.markdown(f'<div class="stefan-text">👤 Stefan: „{stefan_text}“</div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="stefan-text">👤 Stefan: „{s_text}“</div>', unsafe_allow_html=True)
     
-    if japanisch_text:
-        col1, col2 = st.columns([1, 10])
-        with col2:
-            # TTS Audio generieren
-            try:
-                tts = gTTS(text=japanisch_text, lang='ja')
-                audio_buffer = io.BytesIO()
-                tts.write_to_fp(audio_buffer)
-                b64_audio = base64.b64encode(audio_buffer.getvalue()).decode()
-                # Nur die letzte Nachricht spielt automatisch ab
-                is_last = (i == len(st.session_state.display_history) - 1)
-                auto_play = "autoplay" if is_last else ""
-                st.markdown(f'<audio src="data:audio/mp3;base64,{b64_audio}" controls {auto_play}></audio>', unsafe_allow_html=True)
-            except:
-                st.error("Audio konnte nicht geladen werden.")
+    if j_text:
+        # Audio-Generierung
+        tts = gTTS(text=j_text, lang='ja')
+        b = io.BytesIO()
+        tts.write_to_fp(b)
+        b64 = base64.b64encode(b.getvalue()).decode()
         
-        with st.expander("Übersetzung & Text anzeigen"):
-            st.markdown(f'<div class="seller-bubble"><b>JP:</b> {japanisch_text}<br><br><b>DE:</b> {deutsch_text}</div>', unsafe_allow_html=True)
+        # FIX: Autoplay nur für die absolut letzte Nachricht
+        is_latest = (i == len(st.session_state.display_history) - 1)
+        if is_latest:
+            # Wir nutzen HTML5 Audio mit Autoplay und einem Script-Trigger
+            audio_html = f"""
+                <audio id="japanese_audio" autoplay>
+                    <source src="data:audio/mp3;base64,{b64}" type="audio/mp3">
+                </audio>
+                <script>
+                    var audio = document.getElementById('japanese_audio');
+                    audio.play();
+                </script>
+            """
+            st.markdown(audio_html, unsafe_allow_html=True)
+        else:
+            st.audio(io.BytesIO(base64.b64decode(b64)), format="audio/mp3")
 
-# --- 5. AUDIO RECORDER (UNTERER BEREICH) ---
+    with st.expander("Übersetzung anzeigen"):
+        st.markdown(f'<div class="seller-bubble"><b>JP:</b> {j_text}<br><br><b>DE:</b> {d_text}</div>', unsafe_allow_html=True)
+
+# --- 5. RECORDER ---
 st.write("---")
-st.write("### 🎤 Antworte der Verkäuferin:")
-
-# pause_threshold auf 2.5 Sekunden gesetzt für entspanntes Sprechen
-audio_data = audio_recorder(
-    text="Klicke zum Sprechen",
-    icon_size="3x",
-    pause_threshold=2.5,
-    key="japan_mic_v1"
-)
+audio_data = audio_recorder(text="Antworten (Klicken)", icon_size="3x", pause_threshold=2.5, key="v4_mic")
 
 if audio_data:
-    # Hash prüfen, um Doppel-Trigger zu vermeiden
-    current_hash = hash(audio_data)
-    if st.session_state.last_audio_hash != current_hash:
-        st.session_state.last_audio_hash = current_hash
-        with st.spinner("Die Dame hört zu..."):
-            ai_response = ask_ai(audio_data, place)
-            st.session_state.display_history.append(ai_response)
+    new_hash = hash(audio_data)
+    if st.session_state.last_hash != new_hash:
+        st.session_state.last_hash = new_hash
+        with st.spinner("Die Dame antwortet..."):
+            ans = ask_ai(audio_data, place)
+            st.session_state.display_history.append(ans)
             st.rerun()
