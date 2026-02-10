@@ -6,26 +6,19 @@ import io
 import base64
 import re
 
-# --- 1. SETUP & ROBUSTES DESIGN ---
-st.set_page_config(page_title="Japanisch Trainer", layout="centered")
+# --- 1. SETUP ---
+st.set_page_config(page_title="Japanisch-Trainer", layout="centered")
 
 st.markdown("""
 <style>
     .stApp { background-color: #f4e7d3 !important; }
-    h1, h2, h3 { color: #002b5b !important; font-weight: 800 !important; }
-    
-    .chat-bubble { 
-        background: #ffffff; padding: 20px; border-radius: 15px; 
-        border: 2px solid #002b5b; margin: 15px 0;
-        box-shadow: 4px 4px 0px #bc002d;
-    }
-    .jp-text { font-size: 1.5rem !important; color: #002b5b !important; font-weight: bold; display: block; }
-    .de-text { font-size: 1rem !important; color: #bc002d !important; font-style: italic; margin-top: 10px; display: block; }
-    .stefan-box { color: #1a1a1a !important; font-weight: bold; background: rgba(255,255,255,0.5); padding: 5px 10px; border-radius: 5px; }
+    .stefan-box { background: white; padding: 15px; border-radius: 10px; border-left: 5px solid #002b5b; margin: 10px 0; color: #1a1a1a; }
+    .help-box { background: #ffffff; padding: 15px; border-radius: 10px; border: 2px dashed #bc002d; margin-top: 10px; }
+    h1, h2, h3 { color: #002b5b !important; }
 </style>
 """, unsafe_allow_html=True)
 
-# --- 2. KI LOGIK ---
+# --- 2. KI FUNKTIONEN ---
 @st.cache_resource
 def get_model():
     api_key = st.secrets.get("GEMINI_API_KEY")
@@ -33,101 +26,86 @@ def get_model():
     genai.configure(api_key=api_key)
     return genai.GenerativeModel('gemini-1.5-flash')
 
-if "messages" not in st.session_state: st.session_state.messages = []
+if "chat_history" not in st.session_state: st.session_state.chat_history = []
 if "last_hash" not in st.session_state: st.session_state.last_hash = None
 
-def ask_ai(audio_bytes, ort):
+def run_conversation(audio_bytes, ort):
     model = get_model()
-    # Extrem strenger Prompt
-    prompt = (f"Du bist eine japanische Verkäuferin in {ort}. Stefan lernt Japanisch.\n"
-              "VERHALTENSREGELN:\n"
-              "1. Antworte kurz (1-2 Sätze) auf Japanisch.\n"
-              "2. Stelle immer EINE Frage.\n"
-              "3. Halte dich EXAKT an dieses Schema, ohne Abweichung:\n\n"
-              "TRANSKRIPT: [Was Stefan sagte]\n"
-              "ANTWORT: [Japanisch]\n"
-              "UEBERSETZUNG: [Deutsch]")
+    if not model: return None
+    
+    # Prompt für präzise Struktur
+    prompt = (f"Du bist eine japanische Verkäuferin in {ort}. "
+              "Analysiere das Audio von Stefan und antworte exakt so:\n"
+              "STEFAN_DE: [Deutsche Übersetzung von dem, was Stefan gesagt hat]\n"
+              "ANTWORT_JP: [Deine Antwort auf Japanisch, max 2 Sätze]\n"
+              "ANTWORT_DE: [Übersetzung deiner Antwort]\n"
+              "ROMAJI: [Deine Antwort in Lautschrift]")
     
     try:
         audio_part = {"mime_type": "audio/wav", "data": audio_bytes}
-        res = model.generate_content([prompt] + [m["raw"] for m in st.session_state.messages[-3:]] + [audio_part])
+        res = model.generate_content([prompt] + st.session_state.chat_history[-4:] + [audio_part])
         return res.text
     except Exception as e:
-        return f"Fehler: {str(e)}"
+        st.error(f"KI Fehler: {e}")
+        return None
 
-# --- 3. PARSING LOGIK (DER STABILITÄTS-ANKER) ---
-def parse_response(text):
-    # Wir suchen nach den Markern, ignorieren aber Groß/Kleinschreibung
-    s_match = re.search(r"TRANSKRIPT:(.*?)(?=ANTWORT:|$)", text, re.S | re.I)
-    j_match = re.search(r"ANTWORT:(.*?)(?=UEBERSETZUNG:|$)", text, re.S | re.I)
-    d_match = re.search(r"UEBERSETZUNG:(.*)", text, re.S | re.I)
-    
-    stefan = s_match.group(1).strip() if s_match else "Unklar"
-    japanisch = j_match.group(1).strip() if j_match else ""
-    deutsch = d_match.group(1).strip() if d_match else ""
-    
-    # Fallback: Falls die KI alles in einen Block haut
-    if not japanisch and len(text) > 5:
-        # Nimm den Text, der japanische Schriftzeichen enthält
-        jp_chars = re.findall(r"[\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FFF]+.*", text)
-        japanisch = jp_chars[0] if jp_chars else text
-        deutsch = "Übersetzung nicht im Format"
-        
-    return stefan, japanisch, deutsch
-
-# --- 4. UI ---
-st.title("🏯 Onkel Ringos Japan-Trainer")
+# --- 3. UI ---
+st.title("🏯 Japanisch Sprech-Training")
 
 with st.sidebar:
-    st.markdown("### 📍 Szenario")
-    ort = st.selectbox("Ort:", ["Metzgerei Takezono", "McDonald's Ashiya", "Arima Onsen Bus"])
+    ort = st.selectbox("Szenario:", ["Metzgerei Takezono", "McDonald's", "Busstation Arima Onsen"])
     if st.button("Gespräch löschen"):
-        st.session_state.messages = []
+        st.session_state.chat_history = []
         st.session_state.last_hash = None
         st.rerun()
 
 # Verlauf anzeigen
-for i, m in enumerate(st.session_state.messages):
-    is_latest = (i == len(st.session_state.messages) - 1)
-    
-    st.markdown(f'<div class="stefan-box">👤 Stefan: {m["stefan"]}</div>', unsafe_allow_html=True)
-    
-    # Audio-Ausgabe
-    if m['japanisch']:
-        try:
-            tts = gTTS(text=m['japanisch'], lang='ja')
+for i, m in enumerate(st.session_state.chat_history):
+    # Parsing der KI Antwort
+    text = m if isinstance(m, str) else ""
+    s_de = re.search(r"STEFAN_DE:(.*?)(?=ANTWORT_JP:|$)", text, re.S)
+    a_jp = re.search(r"ANTWORT_JP:(.*?)(?=ANTWORT_DE:|$)", text, re.S)
+    a_de = re.search(r"ANTWORT_DE:(.*?)(?=ROMAJI:|$)", text, re.S)
+    romaji = re.search(r"ROMAJI:(.*)", text, re.S)
+
+    if a_jp:
+        with st.container():
+            # 1. Was Stefan gesagt hat (Prüfung)
+            st.markdown(f'<div class="stefan-box"><b>Du sagtest (Deutsch):</b><br>{s_de.group(1).strip() if s_de else "..."}</div>', unsafe_allow_html=True)
+            
+            # 2. Audio der Verkäuferin
+            jp_text = a_jp.group(1).strip()
+            tts = gTTS(text=jp_text, lang='ja')
             b = io.BytesIO(); tts.write_to_fp(b); b64 = base64.b64encode(b.getvalue()).decode()
+            
+            is_latest = (i == len(st.session_state.chat_history) - 1)
+            st.write("📢 **Antwort der Verkäuferin:**")
             if is_latest:
                 st.markdown(f'<audio src="data:audio/mp3;base64,{b64}" controls autoplay></audio>', unsafe_allow_html=True)
             else:
                 st.audio(io.BytesIO(base64.b64decode(b64)), format="audio/mp3")
-        except: pass
 
-    st.markdown(f"""
-    <div class="chat-bubble">
-        <span class="jp-text">{m['japanisch']}</span>
-        <span class="de-text">({m['deutsch']})</span>
-    </div>
-    """, unsafe_allow_html=True)
+            # 3. Hilfe-Button für Text
+            with st.expander("Text & Hilfe anzeigen"):
+                st.markdown(f"""
+                <div class="help-box">
+                    <b>Japanisch:</b> {jp_text}<br><br>
+                    <b>Romaji:</b> {romaji.group(1).strip() if romaji else ""}<br><br>
+                    <b>Deutsch:</b> {a_de.group(1).strip() if a_de else ""}
+                </div>
+                """, unsafe_allow_html=True)
+        st.divider()
 
-# --- 5. MIKROFON ---
-st.write("---")
-# Der Key sorgt dafür, dass das Mikrofon nach jedem Turn "frisch" ist
-audio_data = audio_recorder(text="Aufnahme läuft...", icon_size="3x", pause_threshold=2.5, key=f"mic_{len(st.session_state.messages)}")
+# --- 4. AUFNAHME ---
+st.write("### 🎤 Sprich jetzt auf Japanisch:")
+audio_data = audio_recorder(text="", icon_size="3x", pause_threshold=2.5, key=f"mic_{len(st.session_state.chat_history)}")
 
 if audio_data:
     curr_hash = hash(audio_data)
     if st.session_state.last_hash != curr_hash:
         st.session_state.last_hash = curr_hash
-        with st.spinner("Höre zu..."):
-            raw_res = ask_ai(audio_data, ort)
-            s, j, d = parse_response(raw_res)
-            
-            if j: # Nur speichern, wenn wir japanischen Text haben
-                st.session_state.messages.append({
-                    "stefan": s,
-                    "japanisch": j,
-                    "deutsch": d,
-                    "raw": raw_res
-                })
+        with st.spinner("Verkäuferin hört zu..."):
+            response_text = run_conversation(audio_data, ort)
+            if response_text:
+                st.session_state.chat_history.append(response_text)
                 st.rerun()
