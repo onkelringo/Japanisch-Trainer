@@ -5,123 +5,121 @@ from gtts import gTTS
 import io
 import base64
 
-# --- 1. INITIALISIERUNG ---
-st.set_page_config(page_title="Onkel Ringos Japan-Training", layout="wide")
+# --- 1. KONFIGURATION ---
+st.set_page_config(page_title="Japanisch-Trainer", layout="centered")
 
+# Design: Fokus auf das Gespräch
 st.markdown("""
 <style>
-    .stApp { background-color: #f4e7d3 !important; }
-    h1 { color: #002b5b !important; border-bottom: 5px solid #bc002d !important; }
-    .seller-bubble { 
-        font-size: 1.1rem !important; color: #ffffff !important; 
-        background-color: #002b5b !important; padding: 15px; 
-        border-radius: 15px; border-left: 8px solid #bc002d;
-        margin: 10px 0;
+    .stApp { background-color: #fdf6e3; }
+    .chat-card { 
+        background: white; padding: 15px; border-radius: 10px; 
+        border-left: 5px solid #bc002d; margin-bottom: 10px;
+        box-shadow: 2px 2px 5px rgba(0,0,0,0.05);
     }
-    .stefan-text { font-size: 1rem; color: #bc002d; font-weight: bold; margin-top: 15px; }
-    /* Mikrofon-Zentrierung */
-    div[data-testid="stVerticalBlock"] > div:has(svg) {
-        display: flex !important; justify-content: center !important; 
-        transform: scale(1.3); margin: 20px 0 !important;
-    }
+    .japanese-text { font-size: 1.2rem; color: #002b5b; font-weight: bold; }
+    .german-sub { font-size: 0.9rem; color: #666; font-style: italic; }
 </style>
 """, unsafe_allow_html=True)
 
-# --- 2. KI MODELL ---
+# --- 2. KI LOGIK ---
 @st.cache_resource
-def get_model():
+def load_model():
     api_key = st.secrets.get("GEMINI_API_KEY")
     if not api_key: return None
     genai.configure(api_key=api_key)
     return genai.GenerativeModel('gemini-1.5-flash')
 
-# --- 3. SESSION STATE ---
-if "chat_history" not in st.session_state: st.session_state.chat_history = []
-if "display_history" not in st.session_state: st.session_state.display_history = []
-if "last_hash" not in st.session_state: st.session_state.last_hash = None
+if "messages" not in st.session_state:
+    st.session_state.messages = []
+if "last_hash" not in st.session_state:
+    st.session_state.last_hash = None
 
-def ask_ai(audio_bytes, ort):
-    model = get_model()
-    if not model: return "API Fehler"
-    
-    system_instruction = (
-        f"Du bist eine japanische Verkäuferin in {ort}. Stefan ist Ausländer und lernt Japanisch. "
-        "REGELEINHALTUNG: "
-        "1. Sei extrem höflich, aber sprich einfaches Japanisch. "
-        "2. Antworte in maximal 2 Sätzen. "
-        "3. Stelle IMMER genau EINE Frage am Ende. "
-        "4. ABLAUF: Begrüßung -> Herkunft -> Bestellung -> 'O-machido-sama' -> Smalltalk (Dauer des Aufenthalts). "
-        "FORMAT: STEFAN: [Was er sagte] JAPANISCH: [Antwort + Frage] DEUTSCH: [Übersetzung]"
+def process_audio(audio_bytes, ort):
+    model = load_model()
+    prompt = (
+        f"Du bist eine japanische Verkäuferin in {ort}. Stefan lernt Japanisch. "
+        "REGLER: Antworte NUR auf Japanisch (höflich, einfach, max 2 Sätze). "
+        "Stelle immer eine Anschlussfrage. "
+        "Antworte STRENG in diesem Schema:\n"
+        "STEFAN: [Was er sagte]\n"
+        "JAPANISCH: [Deine Antwort]\n"
+        "DEUTSCH: [Übersetzung deiner Antwort]"
     )
     
     try:
         audio_part = {"mime_type": "audio/wav", "data": audio_bytes}
-        res = model.generate_content([system_instruction] + st.session_state.chat_history[-6:] + [audio_part])
-        st.session_state.chat_history.append(res.text)
-        return res.text
+        # Kontext mitgeben
+        history = [m["raw"] for m in st.session_state.messages[-4:]]
+        response = model.generate_content([prompt] + history + [audio_part])
+        return response.text
     except Exception as e:
         return f"Fehler: {str(e)}"
 
-# --- 4. UI ---
-st.title("🏯 Rollenspiel: Japanische Verkäuferin")
+# --- 3. UI ---
+st.title("🏯 Japanisch Hör-Sprech-Trainer")
+st.write(f"Übe dein Japanisch im Rollenspiel.")
 
 with st.sidebar:
-    place = st.selectbox("Ort:", ["Metzgerei Takezono", "McDonald's", "Busstation Arima Onsen"])
-    if st.button("Gespräch Neustarten"):
-        st.session_state.chat_history = []
-        st.session_state.display_history = []
+    ort = st.selectbox("Szenario:", ["Metzgerei Takezono", "McDonald's Ashiya", "Arima Onsen Bus"])
+    if st.button("Gespräch löschen"):
+        st.session_state.messages = []
         st.session_state.last_hash = None
         st.rerun()
 
-# Verlauf anzeigen
-for i, entry in enumerate(st.session_state.display_history):
-    s_text = "..."
-    j_text = ""
-    d_text = ""
+# Anzeige des Verlaufs
+for i, m in enumerate(st.session_state.messages):
+    is_latest = (i == len(st.session_state.messages) - 1)
     
-    if "STEFAN:" in entry and "JAPANISCH:" in entry:
-        s_text = entry.split("STEFAN:")[1].split("JAPANISCH:")[0].strip()
-        j_text = entry.split("JAPANISCH:")[1].split("DEUTSCH:")[0].strip()
-        d_text = entry.split("DEUTSCH:")[1].strip() if "DEUTSCH:" in entry else ""
-
-    st.markdown(f'<div class="stefan-text">👤 Stefan: „{s_text}“</div>', unsafe_allow_html=True)
-    
-    if j_text:
-        # Audio-Generierung
-        tts = gTTS(text=j_text, lang='ja')
-        b = io.BytesIO()
-        tts.write_to_fp(b)
-        b64 = base64.b64encode(b.getvalue()).decode()
+    with st.container():
+        st.markdown(f"**Stefan:** {m['stefan']}")
         
-        # FIX: Autoplay nur für die absolut letzte Nachricht
-        is_latest = (i == len(st.session_state.display_history) - 1)
+        # Audio-Ausgabe (Japanisch)
+        tts = gTTS(text=m['japanisch'], lang='ja')
+        b = io.BytesIO(); tts.write_to_fp(b); b64 = base64.b64encode(b.getvalue()).decode()
+        
         if is_latest:
-            # Wir nutzen HTML5 Audio mit Autoplay und einem Script-Trigger
-            audio_html = f"""
-                <audio id="japanese_audio" autoplay>
-                    <source src="data:audio/mp3;base64,{b64}" type="audio/mp3">
-                </audio>
-                <script>
-                    var audio = document.getElementById('japanese_audio');
-                    audio.play();
-                </script>
-            """
-            st.markdown(audio_html, unsafe_allow_html=True)
+            st.markdown(f'<audio src="data:audio/mp3;base64,{b64}" controls autoplay></audio>', unsafe_allow_html=True)
         else:
             st.audio(io.BytesIO(base64.b64decode(b64)), format="audio/mp3")
+            
+        with st.expander("Hilfe / Text anzeigen"):
+            st.markdown(f"""
+            <div class="chat-card">
+                <div class="japanese-text">{m['japanisch']}</div>
+                <div class="german-sub">{m['deutsch']}</div>
+            </div>
+            """, unsafe_allow_html=True)
 
-    with st.expander("Übersetzung anzeigen"):
-        st.markdown(f'<div class="seller-bubble"><b>JP:</b> {j_text}<br><br><b>DE:</b> {d_text}</div>', unsafe_allow_html=True)
-
-# --- 5. RECORDER ---
+# --- 4. AUFNAHME ---
 st.write("---")
-audio_data = audio_recorder(text="Antworten (Klicken)", icon_size="3x", pause_threshold=2.5, key="v4_mic")
+# Der Key ändert sich mit der Anzahl der Nachrichten -> erzwingt Refresh des Recorders
+audio_data = audio_recorder(
+    text="Sprich jetzt auf Japanisch...", 
+    icon_size="3x", 
+    pause_threshold=2.5, 
+    key=f"rec_{len(st.session_state.messages)}"
+)
 
 if audio_data:
-    new_hash = hash(audio_data)
-    if st.session_state.last_hash != new_hash:
-        st.session_state.last_hash = new_hash
-        with st.spinner("Die Dame antwortet..."):
-            ans = ask_ai(audio_data, place)
-            st.session_state.display_history.append(ans)
-            st.rerun()
+    curr_hash = hash(audio_data)
+    if st.session_state.last_hash != curr_hash:
+        st.session_state.last_hash = curr_hash
+        with st.spinner("Verkäuferin hört zu..."):
+            raw_res = process_audio(audio_data, ort)
+            
+            # Parsen der Antwort
+            try:
+                s_text = raw_res.split("STEFAN:")[1].split("JAPANISCH:")[0].strip()
+                j_text = raw_res.split("JAPANISCH:")[1].split("DEUTSCH:")[0].strip()
+                d_text = raw_res.split("DEUTSCH:")[1].strip()
+                
+                st.session_state.messages.append({
+                    "stefan": s_text,
+                    "japanisch": j_text,
+                    "deutsch": d_text,
+                    "raw": raw_res
+                })
+                st.rerun()
+            except:
+                st.error("Die KI hat das Format nicht eingehalten. Bitte versuch es noch einmal.")
